@@ -41,8 +41,8 @@ const intakeModes = [
 const baseDashboardStats = [
   {
     title: "Total Shipments",
-    value: "1",
-    description: "Active document set under intelligence review",
+    value: "0",
+    description: "No active uploads in the analysis queue",
     trend: "+0.0%",
     direction: "up",
     updated: "Just now",
@@ -50,7 +50,7 @@ const baseDashboardStats = [
   },
   {
     title: "Critical Clearance Flags",
-    value: "1",
+    value: "0",
     description: "High-risk document sets requiring inspection",
     trend: "+0.0%",
     direction: "up",
@@ -78,9 +78,9 @@ const baseDashboardStats = [
 ];
 
 const defaultAnalysis = {
-  riskScore: 64,
-  confidenceScore: 85,
-  status: "MEDIUM",
+  riskScore: 0,
+  confidenceScore: null,
+  status: "LOW",
   recommendedAction: "Upload a document set to begin analysis",
   explanation:
     "GhostShip cross-checks invoice, packing list, and bill of lading data to detect fraud patterns, declaration mismatches, and physically implausible cargo conditions before arrival.",
@@ -119,8 +119,8 @@ const defaultAnalysis = {
 const defaultResults = [
   {
     shipment_id: "Pending",
-    classification: "MEDIUM",
-    risk_score: 64,
+    classification: "LOW",
+    risk_score: 0,
     action: "Awaiting document upload",
     explanation: defaultAnalysis.explanation,
     details: {},
@@ -232,6 +232,91 @@ function deriveRiskTags(engineBreakdown, anomalies) {
   if (engineBreakdown.Physics >= 0.35) tags.push("PHYSICAL IMPOSSIBILITY");
   if (anomalies.some((row) => row.type.toLowerCase().includes("missing"))) tags.push("DATA COMPLETENESS");
   return tags.length ? tags : ["CLEARANCE READY"];
+}
+
+function classifyRiskScore(score) {
+  if (score <= 30) return "LOW";
+  if (score <= 70) return "MEDIUM";
+  return "HIGH";
+}
+
+function actionForStatus(status) {
+  if (status === "LOW") return "Direct clearance";
+  if (status === "MEDIUM") return "Secondary inspection";
+  return "Full inspection";
+}
+
+function titleCaseEngine(engine) {
+  return engine.charAt(0).toUpperCase() + engine.slice(1).toLowerCase();
+}
+
+function summarizeResult(result) {
+  const score = Number(result.risk_score ?? 0);
+  const status = classifyRiskScore(score);
+  const detailMessages = Object.entries(result.details || {}).flatMap(([category, group]) =>
+    Object.values(group || {}).map((message) => ({ category, message })),
+  );
+
+  if (!detailMessages.length) {
+    return status === "LOW"
+      ? "No significant anomalies detected. Shipment appears normal."
+      : `Risk Score: ${score}/100. Review required based on model and rule-based scoring signals.`;
+  }
+
+  const uniqueMessages = [...new Set(detailMessages.map((item) => item.message))];
+  return `Risk Score: ${score}/100. Key concerns: ${uniqueMessages.slice(0, 3).join("; ")}`;
+}
+
+function deriveEngineBadges(result) {
+  const badges = [];
+  const engineScores = result.engine_scores || {};
+  const detailKeys = Object.keys(result.details || {});
+  const candidates = [
+    { key: "physics", label: "PHYS" },
+    { key: "document", label: "DOC" },
+    { key: "behavior", label: "BEHAV" },
+    { key: "network", label: "NET" },
+  ];
+
+  candidates.forEach((candidate) => {
+    const score = engineScores[candidate.key] ?? engineScores[titleCaseEngine(candidate.key)];
+    if ((typeof score === "number" && score > 0.2) || detailKeys.includes(candidate.key)) {
+      badges.push(candidate.label);
+    }
+  });
+
+  return badges.length ? badges : ["DOC"];
+}
+
+function normalizeResult(result) {
+  const score = Number(result.risk_score ?? 0);
+  const status = classifyRiskScore(score);
+  return {
+    ...result,
+    classification: status,
+    action: actionForStatus(status),
+    summary: summarizeResult(result),
+    engineBadges: deriveEngineBadges(result),
+  };
+}
+
+function formatAuditTimestamp(value, index = 0) {
+  if (value && !String(value).includes("ago")) return String(value);
+  const date = new Date(Date.now() - index * 60000);
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function engineLabelFromCategory(category) {
+  if (category === "physics") return "PHYS";
+  if (category === "document") return "DOC";
+  if (category === "behavior") return "BEHAV";
+  if (category === "network") return "NET";
+  return "DOC";
 }
 
 function downloadAnalysisReport({ analysis, results, anomalyRows, intakeMode }) {
@@ -585,6 +670,7 @@ function ShipmentDetails({ details, intakeMode }) {
 function RiskGauge({ analysis }) {
   const circumference = 2 * Math.PI * 58;
   const strokeDashoffset = circumference * (1 - analysis.riskScore / 100);
+  const hasActiveAnalysis = analysis.shipmentDetails.shipmentId !== "Pending";
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
@@ -608,12 +694,17 @@ function RiskGauge({ analysis }) {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-4xl font-semibold tracking-tight text-slate-950">{analysis.riskScore}</span>
+                <span className="text-4xl font-semibold tracking-tight text-slate-950">
+                  {hasActiveAnalysis ? analysis.riskScore : "--"}
+                </span>
                 <span className="text-sm font-medium text-slate-500">/ 100</span>
               </div>
             </div>
             <p className="mt-3 text-sm font-medium text-slate-600">
-              Confidence: <span className="font-semibold text-slate-900">{analysis.confidenceScore}%</span>
+              Confidence:{" "}
+              <span className="font-semibold text-slate-900">
+                {analysis.confidenceScore == null ? "--" : `${analysis.confidenceScore}%`}
+              </span>
             </p>
           </div>
         </div>
@@ -677,15 +768,38 @@ function RiskGauge({ analysis }) {
   );
 }
 
-function AnomalyTable({ rows }) {
+function AnomalyTable({ rows, analysis }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Flagged Anomalies</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">Case Review Table</h2>
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">Shipment Anomaly Log</h2>
         </div>
         <FileSearch className="h-5 w-5 text-slate-400" />
+      </div>
+
+      <div className="mb-4 grid gap-3 rounded-[28px] border border-slate-200 bg-slate-50/80 px-4 py-4 md:grid-cols-2 xl:grid-cols-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Shipment</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{analysis.shipmentDetails.shipmentId}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Company</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{analysis.shipmentDetails.company || "Unknown"}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Route</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">
+            {analysis.shipmentDetails.origin} → {analysis.shipmentDetails.destination}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Commodity / Value</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">
+            {analysis.shipmentDetails.commodity} · {analysis.shipmentDetails.declaredValue}
+          </p>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -693,25 +807,36 @@ function AnomalyTable({ rows }) {
           <thead>
             <tr className="text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <th className="pb-2">Type</th>
+              <th className="pb-2">Engine</th>
               <th className="pb-2">Severity</th>
               <th className="pb-2">Status</th>
               <th className="pb-2">Timestamp</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.type}-${row.timestamp}`} className="rounded-2xl bg-slate-50">
-                <td className="rounded-l-2xl px-4 py-3 font-medium text-slate-900">{row.type}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ring-1 ${severityTone(row.severity)}`}>
-                    {row.severity}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-slate-700">{row.status}</td>
-                <td className="rounded-r-2xl px-4 py-3 text-slate-500">{row.timestamp}</td>
-              </tr>
-            ))}
-          </tbody>
+              {rows.map((row, index) => (
+                <tr key={`${row.type}-${row.timestamp}-${index}`} className="rounded-2xl bg-slate-50">
+                  <td className="rounded-l-2xl px-4 py-3 font-medium text-slate-900">{row.type}</td>
+                  <td className="px-4 py-3">
+                    <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-700">
+                      {row.engine || "DOC"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ring-1 ${severityTone(row.severity)}`}>
+                      {row.severity}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">{row.status}</td>
+                  <td className="rounded-r-2xl px-4 py-3 text-slate-500">
+                    <div className="flex flex-col">
+                      <span>{row.timestamp}</span>
+                      <span className="text-xs text-slate-400">{row.absoluteTimestamp || formatAuditTimestamp(row.timestamp, index)}</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
         </table>
       </div>
     </section>
@@ -765,6 +890,32 @@ function MapVisualization({ details }) {
 }
 
 function IntelligencePanel({ analysis }) {
+  const actionSteps =
+    analysis.status === "HIGH"
+      ? [
+          "Review submitted invoice, bill of lading, and declaration values immediately.",
+          "Place the shipment on hold pending compliance and cargo verification.",
+          "Escalate the case to inspection control for physical examination.",
+        ]
+      : analysis.status === "MEDIUM"
+        ? [
+            "Review IGM, BOL, and invoice fields for cross-document mismatch.",
+            "Verify company KYC and ownership details within 24 hours.",
+            "Route the shipment to secondary inspection before release.",
+          ]
+        : [
+            "Clear the shipment for standard processing.",
+            "Retain the audit record for routine post-clearance review.",
+            "Continue passive monitoring for related filings.",
+          ];
+
+  const narrativeBadges = [
+    analysis.engineBreakdown.Document > 0.2 ? { label: "DOC", title: "Document inconsistency and value comparison" } : null,
+    analysis.engineBreakdown.Physics > 0.2 ? { label: "PHYS", title: "Physical plausibility and cargo condition checks" } : null,
+    analysis.engineBreakdown.Behavior > 0.2 ? { label: "BEHAV", title: "Behavioral timing and trust checks" } : null,
+    analysis.engineBreakdown.Network > 0.2 ? { label: "NET", title: "Linked entity and network checks" } : null,
+  ].filter(Boolean);
+
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
       <div className="mb-4 flex items-center justify-between">
@@ -776,6 +927,18 @@ function IntelligencePanel({ analysis }) {
       </div>
 
       <p className="text-sm leading-7 text-slate-700">{analysis.explanation}</p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {narrativeBadges.map((badge) => (
+          <span
+            key={badge.label}
+            title={badge.title}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-700"
+          >
+            {badge.label}
+          </span>
+        ))}
+      </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -791,8 +954,13 @@ function IntelligencePanel({ analysis }) {
           <p className="mt-2 text-sm text-slate-700">Missing core shipment fields raise risk even before the cargo reaches the port.</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Decision support</p>
-          <p className="mt-2 text-sm text-slate-700">Risk output translates directly into clearance, review, or physical inspection action.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Recommended Action</p>
+          <div className="mt-2 space-y-2 text-sm text-slate-700">
+            <p className="font-semibold text-slate-900">{analysis.recommendedAction}</p>
+            {actionSteps.map((step) => (
+              <p key={step}>{step}</p>
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -856,7 +1024,14 @@ function QuickActions({ setActiveView, onExport }) {
   );
 }
 
-function MonitoringTable({ results }) {
+function MonitoringTable({ results, riskFilter, setRiskFilter }) {
+  const filters = [
+    { key: "ALL", label: "All" },
+    { key: "HIGH", label: "High Risk" },
+    { key: "MEDIUM", label: "Medium" },
+    { key: "LOW", label: "Low" },
+  ];
+
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
       <div className="mb-4 flex items-center justify-between">
@@ -867,11 +1042,29 @@ function MonitoringTable({ results }) {
         <Boxes className="h-5 w-5 text-slate-400" />
       </div>
 
+      <div className="mb-4 flex flex-wrap gap-2">
+        {filters.map((filter) => (
+          <button
+            key={filter.key}
+            type="button"
+            onClick={() => setRiskFilter(filter.key)}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] transition ${
+              riskFilter === filter.key
+                ? "bg-slate-900 text-white"
+                : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
+            }`}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="min-w-full border-separate border-spacing-y-2 text-sm">
           <thead>
             <tr className="text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <th className="pb-2">Shipment</th>
+              <th className="pb-2">Engine</th>
               <th className="pb-2">Status</th>
               <th className="pb-2">Risk Score</th>
               <th className="pb-2">Action</th>
@@ -883,13 +1076,26 @@ function MonitoringTable({ results }) {
               <tr key={result.shipment_id} className="rounded-2xl bg-slate-50">
                 <td className="rounded-l-2xl px-4 py-3 font-medium text-slate-900">{result.shipment_id}</td>
                 <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.engineBadges.map((badge) => (
+                      <span
+                        key={`${result.shipment_id}-${badge}`}
+                        title={badge}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-700"
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
                   <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ring-1 ${severityTone(result.classification)}`}>
                     {result.classification}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-slate-700">{result.risk_score}</td>
                 <td className="px-4 py-3 text-slate-700">{result.action}</td>
-                <td className="rounded-r-2xl px-4 py-3 text-slate-500">{result.explanation}</td>
+                <td className="rounded-r-2xl px-4 py-3 text-slate-500">{result.summary}</td>
               </tr>
             ))}
           </tbody>
@@ -1057,6 +1263,7 @@ function App() {
   const [analysis, setAnalysis] = useState(defaultAnalysis);
   const [dashboardStats, setDashboardStats] = useState(baseDashboardStats);
   const [results, setResults] = useState(defaultResults);
+  const [riskFilter, setRiskFilter] = useState("ALL");
   const [anomalyRows, setAnomalyRows] = useState([
     { type: "Waiting for uploaded shipment documents", severity: "LOW", status: "Idle", timestamp: "Now" },
   ]);
@@ -1075,6 +1282,12 @@ function App() {
       })),
     [analysis.shipmentDetails.containerId, analysis.shipmentDetails.destination, analysis.shipmentDetails.origin, anomalyRows],
   );
+
+  const monitoredResults = useMemo(() => {
+    const normalized = (results || []).map(normalizeResult).sort((a, b) => Number(b.risk_score ?? 0) - Number(a.risk_score ?? 0));
+    if (riskFilter === "ALL") return normalized;
+    return normalized.filter((result) => result.classification === riskFilter);
+  }, [results, riskFilter]);
 
   function handleExport() {
     downloadAnalysisReport({ analysis, results, anomalyRows, intakeMode });
@@ -1134,27 +1347,28 @@ function App() {
       const engineBreakdown = mapBreakdown(top.engine_breakdown);
       const declaredValue = formatCurrency(details.value);
       const comparisonInsight = deriveExpectedRange(declaredValue);
-      const anomalies =
-        payload.anomalies ||
-        Object.entries(payload.results?.[0]?.details || {}).flatMap(([category, group], index) =>
-          Object.values(group).map((message, valueIndex) => ({
-            type: message,
-            severity: payload.results?.[0]?.classification || "MEDIUM",
-            status: valueIndex === 0 ? "Open" : "Review",
-            timestamp: `${index + valueIndex + 1} min ago`,
-            category,
-          })),
-        );
+        const anomalies =
+          payload.anomalies ||
+          Object.entries(payload.results?.[0]?.details || {}).flatMap(([category, group], index) =>
+            Object.values(group).map((message, valueIndex) => ({
+              type: message,
+              severity: classifyRiskScore(payload.results?.[0]?.risk_score ?? top.risk_score ?? 0),
+              status: valueIndex === 0 ? "Open" : "Review",
+              timestamp: `${index + valueIndex + 1} min ago`,
+              category,
+            })),
+          );
 
       setAnalysis({
         riskScore: top.risk_score,
         confidenceScore: deriveConfidence(engineBreakdown, top.confidence),
-        status: top.status,
-        recommendedAction: top.recommended_action,
+        status: classifyRiskScore(top.risk_score),
+        recommendedAction: actionForStatus(classifyRiskScore(top.risk_score)),
         explanation: top.explanation,
         shipmentDetails: {
           shipmentId: details.shipment_id || "Unknown",
           containerId: details.container_id || details.shipment_id || "Unknown",
+          company: details.company || details.company_name || "Unknown",
           commodity: details.commodity || "Unknown",
           origin: details.origin || "Unknown",
           destination: details.destination || "Unknown",
@@ -1172,17 +1386,31 @@ function App() {
         riskTags: top.risk_tags || deriveRiskTags(engineBreakdown, anomalies),
         operationalImpact: {
           riskValue: `${declaredValue} under customs review`,
-          inspectionRequirement: top.recommended_action,
+          inspectionRequirement: actionForStatus(classifyRiskScore(top.risk_score)),
         },
         comparisonInsight,
       });
 
       setDocumentInsights(intakeMode === "documents" ? payload.documents || defaultDocumentInsights : defaultDocumentInsights);
-      setResults(payload.results || defaultResults);
+      setResults((payload.results || defaultResults).map(normalizeResult));
+      setRiskFilter("ALL");
       setAnomalyRows(
         anomalies.length
-          ? anomalies
-          : [{ type: "No material anomalies detected", severity: "LOW", status: "Closed", timestamp: "Just now" }],
+          ? anomalies.map((row, index) => ({
+              ...row,
+              engine: row.engine || engineLabelFromCategory(row.category),
+              absoluteTimestamp: row.absoluteTimestamp || formatAuditTimestamp(row.timestamp, index),
+            }))
+          : [
+              {
+                type: "No material anomalies detected",
+                severity: "LOW",
+                status: "Closed",
+                timestamp: "Just now",
+                absoluteTimestamp: formatAuditTimestamp("Just now"),
+                engine: "DOC",
+              },
+            ],
       );
       setDashboardStats([
         {
@@ -1260,7 +1488,7 @@ function App() {
 
         {(activeView === "operations" || activeView === "analysis") && (
           <section className="grid gap-5 2xl:grid-cols-[1.2fr_0.95fr]">
-            <AnomalyTable rows={anomalyRows} />
+            <AnomalyTable rows={anomalyRows} analysis={analysis} />
             <IntelligencePanel analysis={analysis} />
           </section>
         )}
@@ -1269,7 +1497,7 @@ function App() {
 
         {(activeView === "operations" || activeView === "monitoring") && (
           <section className="grid gap-5 2xl:grid-cols-[1.05fr_1.2fr]">
-            <MonitoringTable results={results} />
+            <MonitoringTable results={monitoredResults} riskFilter={riskFilter} setRiskFilter={setRiskFilter} />
             <MapVisualization details={analysis.shipmentDetails} />
           </section>
         )}
