@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Supabase Check</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4efe6;
+        --card: #fffaf2;
+        --text: #1e1b18;
+        --muted: #6a6259;
+        --accent: #0f9d58;
+        --error: #c0392b;
+        --border: #e5d9c8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        background:
+          radial-gradient(circle at top, #fff4dd 0%, transparent 35%),
+          linear-gradient(135deg, #f7f0e5, #efe4d2);
+        color: var(--text);
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(560px, 100%);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 32px;
+        box-shadow: 0 18px 40px rgba(80, 60, 30, 0.12);
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(2rem, 5vw, 3rem);
+      }
+
+      p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .status {
+        padding: 16px;
+        border-radius: 14px;
+        background: #f8f3eb;
+        border: 1px solid var(--border);
+        font-size: 1rem;
+        line-height: 1.6;
+      }
+
+      .ok {
+        color: var(--accent);
+      }
+
+      .error {
+        color: var(--error);
+      }
+
+      code {
+        font-family: Consolas, monospace;
+        background: #f0e7da;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Supabase Connection Check</h1>
+      <p>This tiny app calls a backend endpoint and shows whether your Supabase project responds.</p>
+      <div class="status" id="status">Checking connection...</div>
+    </main>
+
+    <script>
+      async function loadStatus() {
+        const status = document.getElementById("status");
+
+        try {
+          const response = await fetch("/api/health");
+          const result = await response.json();
+
+          if (!response.ok || !result.ok) {
+            throw new Error(result.message || "Connection failed");
+          }
+
+          status.innerHTML = `
+            <div class="ok"><strong>Connected</strong></div>
+            <div>Project: <code>${result.url}</code></div>
+            <div>Storage buckets found: <code>${result.bucketCount}</code></div>
+            <div>Checked at: <code>${new Date(result.checkedAt).toLocaleString()}</code></div>
+          `;
+        } catch (error) {
+          status.innerHTML = `
+            <div class="error"><strong>Not connected</strong></div>
+            <div>${error.message}</div>
+          `;
+        }
+      }
+
+      loadStatus();
+    </script>
+  </body>
+  </html>
