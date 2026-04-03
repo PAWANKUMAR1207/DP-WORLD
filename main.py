@@ -14,12 +14,47 @@ from engines import (
 from model import MODEL_PATH, predict
 
 
-def analyze_shipment(shipment, all_shipments=None):
-    physics = PhysicsEngine()
-    document = DocumentEngine()
+DEFAULT_ANALYSIS_SETTINGS = {
+    "low_risk_max": 30,
+    "medium_risk_max": 70,
+    "quantity_mismatch_threshold": 0.05,
+    "value_mismatch_threshold": 0.05,
+    "density_threshold": 2000.0,
+    "banana_temperature_floor": 10.0,
+}
+
+
+def _coerce_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def normalize_analysis_settings(settings=None):
+    merged = {**DEFAULT_ANALYSIS_SETTINGS, **(settings or {})}
+    low_risk = int(_coerce_float(merged.get("low_risk_max"), DEFAULT_ANALYSIS_SETTINGS["low_risk_max"]))
+    medium_risk = int(_coerce_float(merged.get("medium_risk_max"), DEFAULT_ANALYSIS_SETTINGS["medium_risk_max"]))
+    if medium_risk < low_risk:
+        medium_risk = low_risk
+
+    return {
+        "low_risk_max": max(0, min(low_risk, 100)),
+        "medium_risk_max": max(low_risk, min(medium_risk, 100)),
+        "quantity_mismatch_threshold": max(0.01, min(_coerce_float(merged.get("quantity_mismatch_threshold"), 0.05), 1.0)),
+        "value_mismatch_threshold": max(0.01, min(_coerce_float(merged.get("value_mismatch_threshold"), 0.05), 1.0)),
+        "density_threshold": max(100.0, _coerce_float(merged.get("density_threshold"), 2000.0)),
+        "banana_temperature_floor": max(-20.0, min(_coerce_float(merged.get("banana_temperature_floor"), 10.0), 40.0)),
+    }
+
+
+def analyze_shipment(shipment, all_shipments=None, settings=None):
+    analysis_settings = normalize_analysis_settings(settings)
+    physics = PhysicsEngine(analysis_settings)
+    document = DocumentEngine(analysis_settings)
     behavior = BehaviorEngine()
     network = NetworkEngine()
-    scoring = ScoringEngine()
+    scoring = ScoringEngine(analysis_settings)
 
     results = {
         "physics": physics.check(shipment),
@@ -49,11 +84,12 @@ def analyze_shipment(shipment, all_shipments=None):
     }
 
 
-def summarize_shipments(shipments):
+def summarize_shipments(shipments, settings=None):
     if not shipments:
         raise ValueError("No shipments provided for analysis")
 
-    results = [analyze_shipment(shipment, shipments) for shipment in shipments]
+    analysis_settings = normalize_analysis_settings(settings)
+    results = [analyze_shipment(shipment, shipments, analysis_settings) for shipment in shipments]
     counts = Counter(result["classification"] for result in results)
     top_result = max(results, key=lambda item: item["risk_score"])
     top_shipment = next(
@@ -78,8 +114,18 @@ def summarize_shipments(shipments):
             "explanation": top_result["explanation"],
             "shipment_details": {
                 "commodity": top_shipment.get("commodity", "Unknown"),
+                "company": top_shipment.get("company_name")
+                or top_shipment.get("company_id")
+                or top_shipment.get("importer_name")
+                or top_shipment.get("exporter_name")
+                or top_shipment.get("consignee_name")
+                or "Unknown",
                 "origin": top_shipment.get("declared_origin_country")
                 or top_shipment.get("actual_origin_country")
+                or "Unknown",
+                "destination": top_shipment.get("destination_country")
+                or top_shipment.get("destination_port")
+                or top_shipment.get("port_of_discharge")
                 or "Unknown",
                 "quantity": top_shipment.get("invoice_quantity")
                 or top_shipment.get("bol_quantity")
@@ -93,6 +139,7 @@ def summarize_shipments(shipments):
             },
         },
         "results": results,
+        "settings": analysis_settings,
     }
 
 

@@ -1,7 +1,12 @@
 class DocumentEngine:
+    def __init__(self, settings=None):
+        self.settings = settings or {}
+
     def check(self, shipment):
         scores = []
         details = {}
+        quantity_threshold = float(self.settings.get("quantity_mismatch_threshold", 0.05))
+        value_threshold = float(self.settings.get("value_mismatch_threshold", 0.05))
 
         igm_qty = shipment.get("igm_quantity", 0)
         bol_qty = shipment.get("bol_quantity", 0)
@@ -10,7 +15,7 @@ class DocumentEngine:
 
         if len(quantities) >= 2:
             deviation = (max(quantities) - min(quantities)) / max(quantities)
-            if deviation > 0.05:
+            if deviation > quantity_threshold:
                 scores.append(min(deviation * 2, 1.0))
                 details["quantity_mismatch"] = f"{deviation:.1%} deviation"
 
@@ -21,7 +26,7 @@ class DocumentEngine:
 
         if len(values) >= 2:
             deviation = (max(values) - min(values)) / max(values)
-            if deviation > 0.05:
+            if deviation > value_threshold:
                 scores.append(min(deviation * 2, 1.0))
                 details["value_mismatch"] = f"{deviation:.1%} deviation"
 

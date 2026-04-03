@@ -2,6 +2,9 @@ from config import LOW_RISK, MEDIUM_RISK, WEIGHTS
 
 
 class ScoringEngine:
+    def __init__(self, settings=None):
+        self.settings = settings or {}
+
     def calculate(self, engine_results, ml_probability=None):
         rule_score = sum(
             result["score"] * WEIGHTS.get(engine, 0.20)
@@ -22,9 +25,12 @@ class ScoringEngine:
         else:
             final_score = int(rule_score * 100)
 
-        if final_score <= LOW_RISK:
+        low_risk = int(self.settings.get("low_risk_max", LOW_RISK))
+        medium_risk = int(self.settings.get("medium_risk_max", MEDIUM_RISK))
+
+        if final_score <= low_risk:
             classification, action = "LOW", "Direct clearance"
-        elif final_score <= MEDIUM_RISK:
+        elif final_score <= medium_risk:
             classification, action = "MEDIUM", "Secondary inspection"
         else:
             classification, action = "HIGH", "Full inspection"
