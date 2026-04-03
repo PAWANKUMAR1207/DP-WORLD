@@ -38,6 +38,15 @@ const intakeModes = [
   { key: "csv", label: "Single CSV" },
 ];
 
+const defaultCsvSettings = {
+  low_risk_max: 30,
+  medium_risk_max: 70,
+  quantity_mismatch_threshold: 0.05,
+  value_mismatch_threshold: 0.05,
+  density_threshold: 2000,
+  banana_temperature_floor: 10,
+};
+
 const baseDashboardStats = [
   {
     title: "Total Shipments",
@@ -290,11 +299,11 @@ function deriveEngineBadges(result) {
 
 function normalizeResult(result) {
   const score = Number(result.risk_score ?? 0);
-  const status = classifyRiskScore(score);
+  const status = result.classification || classifyRiskScore(score);
   return {
     ...result,
     classification: status,
-    action: actionForStatus(status),
+    action: result.action || actionForStatus(status),
     summary: summarizeResult(result),
     engineBadges: deriveEngineBadges(result),
   };
@@ -511,7 +520,19 @@ function AlertFeed({ alerts }) {
   );
 }
 
-function UploadBox({ intakeMode, setIntakeMode, documents, csvFile, loading, error, onFileChange, onCsvChange, handleAnalyze }) {
+function UploadBox({
+  intakeMode,
+  setIntakeMode,
+  documents,
+  csvFile,
+  csvSettings,
+  onCsvSettingChange,
+  loading,
+  error,
+  onFileChange,
+  onCsvChange,
+  handleAnalyze,
+}) {
   const ready = intakeMode === "documents" ? Object.values(documents).every(Boolean) : Boolean(csvFile);
 
   return (
@@ -573,28 +594,113 @@ function UploadBox({ intakeMode, setIntakeMode, documents, csvFile, loading, err
           ))}
         </div>
       ) : (
-        <label className="block min-w-0 rounded-[28px] border border-dashed border-slate-300 bg-slate-50/70 px-5 py-6 transition hover:border-slate-400 hover:bg-white">
-          <input
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={(event) => onCsvChange(event.target.files?.[0])}
-          />
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
-              <Upload className="h-4.5 w-4.5" />
+        <div className="space-y-4">
+          <label className="block min-w-0 rounded-[28px] border border-dashed border-slate-300 bg-slate-50/70 px-5 py-6 transition hover:border-slate-400 hover:bg-white">
+            <input
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(event) => onCsvChange(event.target.files?.[0])}
+            />
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                <Upload className="h-4.5 w-4.5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="break-words text-base font-semibold text-slate-900">Shipment CSV Manifest</h3>
+                <p className="mt-1 break-words text-sm leading-6 text-slate-600">
+                  Upload your shipment manifest. We'll scan every row for fraud patterns.
+                </p>
+                <p className="mt-3 truncate text-sm font-medium text-slate-900">
+                  {csvFile?.name || "Drop your CSV here, or click to browse"}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="break-words text-base font-semibold text-slate-900">Shipment CSV Manifest</h3>
-              <p className="mt-1 break-words text-sm leading-6 text-slate-600">
-                Upload your shipment manifest. We'll scan every row for fraud patterns.
-              </p>
-              <p className="mt-3 truncate text-sm font-medium text-slate-900">
-                {csvFile?.name || "Drop your CSV here, or click to browse"}
-              </p>
+          </label>
+
+          <div className="rounded-[28px] border border-slate-200 bg-slate-50/70 px-5 py-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Analysis Settings</p>
+                <h3 className="mt-2 text-base font-semibold text-slate-900">CSV Risk Threshold Controls</h3>
+              </div>
+              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Operator
+              </span>
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Low risk max</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={csvSettings.low_risk_max}
+                  onChange={(event) => onCsvSettingChange("low_risk_max", event.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none"
+                />
+              </label>
+              <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Medium risk max</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={csvSettings.medium_risk_max}
+                  onChange={(event) => onCsvSettingChange("medium_risk_max", event.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none"
+                />
+              </label>
+              <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Quantity mismatch threshold</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  value={csvSettings.quantity_mismatch_threshold}
+                  onChange={(event) => onCsvSettingChange("quantity_mismatch_threshold", event.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none"
+                />
+              </label>
+              <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Value mismatch threshold</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  value={csvSettings.value_mismatch_threshold}
+                  onChange={(event) => onCsvSettingChange("value_mismatch_threshold", event.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none"
+                />
+              </label>
+              <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Density threshold</span>
+                <input
+                  type="number"
+                  min="100"
+                  step="50"
+                  value={csvSettings.density_threshold}
+                  onChange={(event) => onCsvSettingChange("density_threshold", event.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none"
+                />
+              </label>
+              <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Perishable Temperature Minimum</span>
+                <input
+                  type="number"
+                  min="-20"
+                  max="40"
+                  step="1"
+                  value={csvSettings.banana_temperature_floor}
+                  onChange={(event) => onCsvSettingChange("banana_temperature_floor", event.target.value)}
+                  className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none"
+                />
+              </label>
             </div>
           </div>
-        </label>
+        </div>
       )}
 
       <div className="mt-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -891,7 +997,7 @@ function MapVisualization({ details }) {
   );
 }
 
-function IntelligencePanel({ analysis }) {
+function IntelligencePanel({ analysis, intakeMode }) {
   const actionSteps =
     analysis.status === "HIGH"
       ? [
@@ -918,6 +1024,37 @@ function IntelligencePanel({ analysis }) {
     analysis.engineBreakdown.Network > 0.2 ? { label: "NET", title: "Linked entity and network checks" } : null,
   ].filter(Boolean);
 
+  const narrativeCards =
+    intakeMode === "csv"
+      ? [
+          {
+            title: "Manifest review",
+            body: "Row-level comparison of declared values, quantities, origins, and entity identifiers across the uploaded manifest.",
+          },
+          {
+            title: "Pattern checks",
+            body: "GhostShip scans for unusual value gaps, timing anomalies, density outliers, and suspicious declaration patterns.",
+          },
+          {
+            title: "Data completeness",
+            body: "Missing shipment fields or incomplete manifest rows are treated as early warning signals before port arrival.",
+          },
+        ]
+      : [
+          {
+            title: "Document review",
+            body: "Cross-document comparison of value, quantity, origin, and container identifiers.",
+          },
+          {
+            title: "Physical checks",
+            body: "Cargo plausibility check based on temperature and density declarations.",
+          },
+          {
+            title: "Completeness",
+            body: "Missing core shipment fields raise risk even before the cargo reaches the port.",
+          },
+        ];
+
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
       <div className="mb-4 flex items-center justify-between">
@@ -928,7 +1065,13 @@ function IntelligencePanel({ analysis }) {
         <Radar className="h-5 w-5 text-slate-400" />
       </div>
 
-      <p className="text-sm leading-7 text-slate-700">{analysis.explanation}</p>
+      <p className="text-sm leading-7 text-slate-700">
+        {intakeMode === "csv"
+          ? analysis.shipmentDetails.shipmentId === "Pending"
+            ? "GhostShip scans uploaded shipment manifests for row-level fraud patterns, declaration mismatches, and operational anomalies before cargo reaches the port."
+            : analysis.explanation
+          : analysis.explanation}
+      </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {narrativeBadges.map((badge) => (
@@ -943,18 +1086,12 @@ function IntelligencePanel({ analysis }) {
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Document review</p>
-          <p className="mt-2 text-sm text-slate-700">Cross-document comparison of value, quantity, origin, and container identifiers.</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Physical checks</p>
-          <p className="mt-2 text-sm text-slate-700">Cargo plausibility check based on temperature and density declarations.</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Completeness</p>
-          <p className="mt-2 text-sm text-slate-700">Missing core shipment fields raise risk even before the cargo reaches the port.</p>
-        </div>
+        {narrativeCards.map((card) => (
+          <div key={card.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{card.title}</p>
+            <p className="mt-2 text-sm text-slate-700">{card.body}</p>
+          </div>
+        ))}
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Recommended Action</p>
           <div className="mt-2 space-y-2 text-sm text-slate-700">
@@ -1261,6 +1398,7 @@ function App() {
     bill_of_lading: null,
   });
   const [csvFile, setCsvFile] = useState(null);
+  const [csvSettings, setCsvSettings] = useState(defaultCsvSettings);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(defaultAnalysis);
   const [dashboardStats, setDashboardStats] = useState(baseDashboardStats);
@@ -1305,6 +1443,14 @@ function App() {
     setError("");
   }
 
+  function updateCsvSetting(key, value) {
+    setCsvSettings((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setError("");
+  }
+
   async function handleAnalyze() {
     if (intakeMode === "documents") {
       const ready = documentFields.every((field) => documents[field.key]);
@@ -1329,6 +1475,7 @@ function App() {
         response = await fetch("/api/analyze-documents", { method: "POST", body: formData });
       } else {
         formData.append("file", csvFile);
+        formData.append("settings", JSON.stringify(csvSettings));
         response = await fetch("/api/analyze", { method: "POST", body: formData });
       }
 
@@ -1364,8 +1511,8 @@ function App() {
       setAnalysis({
         riskScore: top.risk_score,
         confidenceScore: deriveConfidence(engineBreakdown, top.confidence),
-        status: classifyRiskScore(top.risk_score),
-        recommendedAction: actionForStatus(classifyRiskScore(top.risk_score)),
+        status: top.status || classifyRiskScore(top.risk_score),
+        recommendedAction: top.recommended_action || actionForStatus(top.status || classifyRiskScore(top.risk_score)),
         explanation: top.explanation,
         shipmentDetails: {
           shipmentId: details.shipment_id || "Unknown",
@@ -1394,6 +1541,9 @@ function App() {
       });
 
       setDocumentInsights(intakeMode === "documents" ? payload.documents || defaultDocumentInsights : defaultDocumentInsights);
+      if (intakeMode === "csv" && payload.settings) {
+        setCsvSettings(payload.settings);
+      }
       setResults((payload.results || defaultResults).map(normalizeResult));
       setRiskFilter("ALL");
       setAnomalyRows(
@@ -1470,6 +1620,8 @@ function App() {
                   setIntakeMode={setIntakeMode}
                   documents={documents}
                   csvFile={csvFile}
+                  csvSettings={csvSettings}
+                  onCsvSettingChange={updateCsvSetting}
                   loading={loading}
                   error={error}
                   onFileChange={updateDocument}
@@ -1491,7 +1643,7 @@ function App() {
         {(activeView === "operations" || activeView === "analysis") && (
           <section className="grid gap-5 2xl:grid-cols-[1.2fr_0.95fr]">
             <AnomalyTable rows={anomalyRows} analysis={analysis} />
-            <IntelligencePanel analysis={analysis} />
+            <IntelligencePanel analysis={analysis} intakeMode={intakeMode} />
           </section>
         )}
 
