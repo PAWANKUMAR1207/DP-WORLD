@@ -587,9 +587,11 @@ function UploadBox({ intakeMode, setIntakeMode, documents, csvFile, loading, err
             <div className="min-w-0 flex-1">
               <h3 className="break-words text-base font-semibold text-slate-900">Shipment CSV Manifest</h3>
               <p className="mt-1 break-words text-sm leading-6 text-slate-600">
-                Upload a single CSV file to analyze shipment rows through the original GhostShip pipeline.
+                Upload your shipment manifest. We'll scan every row for fraud patterns.
               </p>
-              <p className="mt-3 truncate text-sm font-medium text-slate-900">{csvFile?.name || "No file selected"}</p>
+              <p className="mt-3 truncate text-sm font-medium text-slate-900">
+                {csvFile?.name || "Drop your CSV here, or click to browse"}
+              </p>
             </div>
           </div>
         </label>
@@ -601,7 +603,7 @@ function UploadBox({ intakeMode, setIntakeMode, documents, csvFile, loading, err
           <p className="mt-2 text-sm leading-7 text-slate-700">
             {intakeMode === "documents"
               ? "Upload all three documents, then GhostShip will extract fields, compare declarations, and score cargo risk before arrival."
-              : "Upload one shipment CSV, then GhostShip will score each row and surface the highest-risk shipment for review."}
+              : "1. Upload your CSV -> 2. We analyze all shipments -> 3. Review the riskiest ones first"}
           </p>
         </div>
         <button
@@ -610,7 +612,7 @@ function UploadBox({ intakeMode, setIntakeMode, documents, csvFile, loading, err
           onClick={handleAnalyze}
           className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:scale-[1.01] hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400 sm:w-auto"
         >
-          {loading ? "Documents received. Analyzing..." : "Analyze Shipment"}
+          {loading ? "Documents received. Analyzing..." : "Run Analysis"}
         </button>
       </div>
 
