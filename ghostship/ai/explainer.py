@@ -3,19 +3,19 @@ class AIExplainer:
         explanations = []
 
         translations = {
-            "temperature_anomaly": "Impossible cargo condition",
-            "density_anomaly": "Physical impossibility",
+            "temperature_anomaly": "Cargo condition anomaly",
+            "density_anomaly": "Physical inconsistency",
             "quantity_mismatch": "Document inconsistency",
-            "value_mismatch": "Financial discrepancy",
-            "origin_fraud": "Origin fraud detected",
-            "burst_activity": "Suspicious behavior pattern",
+            "value_mismatch": "Declared value variance",
+            "origin_fraud": "Origin inconsistency detected",
+            "burst_activity": "Submission pattern alert",
             "off_hours": "Timing anomaly",
-            "new_account_high_value": "High-risk profile",
-            "low_trust": "Untrusted entity",
+            "new_account_high_value": "Entity profile alert",
+            "low_trust": "Entity verification alert",
             "unverified_kyc": "Unverified identity",
-            "linked_company": "Network connection",
+            "linked_company": "Relationship signal",
             "shared_director": "Shared director detected",
-            "linked_to_fraud": "Linked to known fraud",
+            "linked_to_fraud": "Linked to prior discrepancies",
         }
 
         for _engine, result in engine_results.items():

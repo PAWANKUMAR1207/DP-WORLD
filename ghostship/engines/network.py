@@ -21,7 +21,7 @@ class NetworkEngine:
             if linked_frauds > 0:
                 scores.append(0.80)
                 details["linked_to_fraud"] = (
-                    f"Linked company has {linked_frauds} fraud cases"
+                    f"Linked company has {linked_frauds} prior discrepancy cases"
                 )
 
         return {"score": max(scores) if scores else 0, "details": details}

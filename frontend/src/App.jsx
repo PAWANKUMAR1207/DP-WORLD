@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
   Bell,
   Boxes,
-  ChevronDown,
   Clock3,
   Container,
   Download,
@@ -38,6 +37,16 @@ const intakeModes = [
   { key: "csv", label: "Single CSV" },
 ];
 
+const defaultOfficerProfile = {
+  full_name: "Officer A. Rahman",
+  role_title: "Customs Risk Officer",
+  badge_id: "ID CR-4172",
+  email: "arahman@ghostship.local",
+  terminal: "Terminal 4",
+  shift_name: "Morning Shift",
+  photo_url: null,
+};
+
 const defaultCsvSettings = {
   low_risk_max: 30,
   medium_risk_max: 70,
@@ -47,44 +56,15 @@ const defaultCsvSettings = {
   banana_temperature_floor: 10,
 };
 
-const baseDashboardStats = [
-  {
-    title: "Total Shipments",
-    value: "0",
-    description: "No active uploads in the analysis queue",
-    trend: "+0.0%",
-    direction: "up",
-    updated: "Just now",
-    sparkline: [24, 26, 28, 27, 29, 31, 32],
-  },
-  {
-    title: "Critical Clearance Flags",
-    value: "0",
-    description: "High-risk document sets requiring inspection",
-    trend: "+0.0%",
-    direction: "up",
-    updated: "Just now",
-    sparkline: [12, 12, 13, 13, 14, 14, 15],
-  },
-  {
-    title: "Medium Risk Cases",
-    value: "0",
-    description: "Secondary review candidates in current queue",
-    trend: "+0.0%",
-    direction: "up",
-    updated: "Just now",
-    sparkline: [14, 14, 14, 15, 15, 15, 16],
-  },
-  {
-    title: "Cleared Shipments",
-    value: "0",
-    description: "Document sets ready for direct processing",
-    trend: "+0.0%",
-    direction: "up",
-    updated: "Just now",
-    sparkline: [8, 9, 9, 10, 10, 11, 11],
-  },
-];
+const defaultHeroMetric = {
+  eyebrow: "Monthly Operations Review",
+  title: "2,847 shipments analyzed this month",
+  description: "Detection coverage across manifest variance, declaration review, cargo integrity, and entity relationship checks.",
+  trend: "+12.4%",
+  direction: "up",
+  updated: "Updated 4 min ago",
+  sparkline: [28, 31, 34, 33, 37, 41, 45, 48, 52],
+};
 
 const defaultAnalysis = {
   riskScore: 0,
@@ -92,10 +72,11 @@ const defaultAnalysis = {
   status: "LOW",
   recommendedAction: "Upload a document set to begin analysis",
   explanation:
-    "GhostShip cross-checks invoice, packing list, and bill of lading data to detect fraud patterns, declaration mismatches, and physically implausible cargo conditions before arrival.",
+    "Upload invoice, packing list, and bill of lading files or a shipment manifest to start the review.",
   shipmentDetails: {
     shipmentId: "Pending",
     containerId: "Pending",
+    company: "Unknown",
     commodity: "Awaiting documents",
     origin: "Unknown",
     destination: "Unknown",
@@ -112,7 +93,7 @@ const defaultAnalysis = {
     Network: 0.05,
   },
   riskFactors: [
-    "Upload invoice, packing list, and bill of lading to generate a live intelligence review.",
+    "Upload invoice, packing list, and bill of lading to begin review.",
   ],
   riskTags: ["DOCUMENT ANALYSIS READY"],
   operationalImpact: {
@@ -151,6 +132,111 @@ const defaultDocumentInsights = {
     file_name: "No file selected",
     parsed_fields: {},
     text_excerpt: "Bill of lading text preview will appear here after analysis.",
+  },
+};
+
+const demoAnalysis = {
+  riskScore: 67,
+  confidenceScore: 92,
+  status: "MEDIUM",
+  recommendedAction: "Secondary inspection",
+  explanation:
+    "The current review identifies quantity variance, declared value drift, and linked-entity history that together justify a secondary inspection decision.",
+  shipmentDetails: {
+    shipmentId: "SHP-2024-0892",
+    containerId: "MSCU-458221-7",
+    company: "BlueWave Logistics LLC",
+    commodity: "Consumer electronics",
+    origin: "Shanghai",
+    destination: "Singapore",
+    quantity: "8,944 units",
+    declaredValue: "USD 2,134,082.19",
+    weight: "18,420 KG",
+    volume: "31.8 CBM",
+    temperature: "Controlled ambient",
+  },
+  engineBreakdown: {
+    Physics: 0.27,
+    Document: 0.43,
+    Behavior: 0.18,
+    Network: 0.12,
+  },
+  riskFactors: [
+    "Quantity variance: 9.1% below expected",
+    "Value discrepancy: USD 456K under declared range",
+    "Entity linked to 2 prior anomalies",
+  ],
+  riskTags: ["DECLARATION DISCREPANCY", "CARGO ANOMALY DETECTED", "ENTITY PROFILE ALERT"],
+  operationalImpact: {
+    riskValue: "USD 2,134,082.19 under customs review",
+    inspectionRequirement: "Secondary inspection",
+  },
+  comparisonInsight: {
+    declared: "USD 2,134,082.19",
+    expected: "USD 2,603,580 - USD 3,371,850",
+  },
+  mismatchMatrix: [
+    { label: "IGM vs BOL", left: "9,840 units", right: "8,944 units", state: "review" },
+    { label: "BOL vs Invoice", left: "8,944 units", right: "8,944 units", state: "aligned" },
+    { label: "IGM vs Invoice", left: "USD 2.59M", right: "USD 2.13M", state: "variance" },
+  ],
+};
+
+const demoResults = [
+  {
+    shipment_id: "SHP-2024-0892",
+    classification: "MEDIUM",
+    risk_score: 67,
+    action: "Secondary inspection",
+    explanation: demoAnalysis.explanation,
+    details: {
+      document: {
+        quantity_variance: "9.1% below expected quantity across IGM and BOL",
+        value_discrepancy: "Declared value remains USD 456K below expected range",
+      },
+      network: {
+        entity_alert: "Linked entity appears in two prior anomaly reviews",
+      },
+    },
+  },
+];
+
+const demoDocumentInsights = {
+  invoice: {
+    file_name: "invoice_shp_2024_0892.pdf",
+    parsed_fields: {
+      container_id: "MSCU-458221-7",
+      shipment_id: "SHP-2024-0892",
+      commodity: "Consumer electronics",
+      declared_value: "USD 2,134,082.19",
+      quantity: "8,944 units",
+      origin_country: "China",
+    },
+    text_excerpt: "Commercial invoice extracted successfully. Declared value USD 2,134,082.19 for 8,944 consumer electronics units routed Shanghai to Singapore.",
+  },
+  packing_list: {
+    file_name: "packing_list_shp_2024_0892.pdf",
+    parsed_fields: {
+      carton_count: "224 cartons",
+      net_weight: "17,860 KG",
+      gross_weight: "18,420 KG",
+      volume_cbm: "31.8 CBM",
+      quantity: "8,944 units",
+      destination_port: "Singapore",
+    },
+    text_excerpt: "Packing list extracted successfully. Quantity aligns with invoice, while weight and carton structure support cargo verification checks.",
+  },
+  bill_of_lading: {
+    file_name: "bol_shp_2024_0892.pdf",
+    parsed_fields: {
+      bol_number: "BOL-884291-SG",
+      container_id: "MSCU-458221-7",
+      shipper: "BlueWave Logistics LLC",
+      consignee: "Harbor Retail Pte Ltd",
+      quantity: "8,944 units",
+      route: "Shanghai to Singapore",
+    },
+    text_excerpt: "Bill of lading extracted successfully. Route and consignee data align, but the IGM comparison still indicates quantity variance requiring review.",
   },
 };
 
@@ -213,6 +299,59 @@ function deriveExpectedRange(valueText) {
   };
 }
 
+function parseCurrencyNumber(valueText) {
+  const numeric = Number(String(valueText ?? "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function buildContributionSegments(engineBreakdown) {
+  const entries = [
+    { key: "Document", label: "Declaration Verification", color: "#2563eb", value: engineBreakdown.Document ?? 0 },
+    { key: "Physics", label: "Cargo Integrity", color: "#f97316", value: engineBreakdown.Physics ?? 0 },
+    { key: "Behavior", label: "Entity Profile", color: "#14b8a6", value: engineBreakdown.Behavior ?? 0 },
+    { key: "Network", label: "Relationship Analysis", color: "#8b5cf6", value: engineBreakdown.Network ?? 0 },
+  ];
+
+  const total = entries.reduce((sum, entry) => sum + entry.value, 0) || 1;
+  let cursor = 0;
+  const segments = entries.map((entry) => {
+    const percentage = Math.round((entry.value / total) * 100);
+    const start = cursor;
+    cursor += (entry.value / total) * 100;
+    return {
+      ...entry,
+      percentage,
+      start,
+      end: cursor,
+    };
+  });
+
+  const gradient = segments
+    .map((segment) => `${segment.color} ${segment.start}% ${segment.end}%`)
+    .join(", ");
+
+  return { segments, gradient };
+}
+
+function buildMismatchMatrix(analysis) {
+  if (Array.isArray(analysis.mismatchMatrix) && analysis.mismatchMatrix.length) {
+    return analysis.mismatchMatrix;
+  }
+  const mismatch = analysis.riskFactors.some((factor) => /deviation|mismatch|variance|inconsistency/i.test(factor));
+  const cargo = analysis.riskTags.some((tag) => tag.includes("CARGO"));
+  const states = {
+    igm_bol: mismatch ? "variance" : "aligned",
+    bol_invoice: mismatch ? "variance" : "aligned",
+    igm_invoice: cargo ? "review" : mismatch ? "variance" : "aligned",
+  };
+
+  return [
+    { label: "IGM vs BOL", left: "Review required", right: "Field variance", state: states.igm_bol },
+    { label: "BOL vs Invoice", left: "Review required", right: "Field variance", state: states.bol_invoice },
+    { label: "IGM vs Invoice", left: "Review required", right: "Field variance", state: states.igm_invoice },
+  ];
+}
+
 function formatCurrency(value) {
   if (value === null || value === undefined || value === "") return "Unknown";
   const numeric = Number(value);
@@ -237,8 +376,8 @@ function formatLooseValue(value) {
 
 function deriveRiskTags(engineBreakdown, anomalies) {
   const tags = [];
-  if (engineBreakdown.Document >= 0.35) tags.push("DOCUMENT FRAUD");
-  if (engineBreakdown.Physics >= 0.35) tags.push("PHYSICAL IMPOSSIBILITY");
+  if (engineBreakdown.Document >= 0.35) tags.push("DOCUMENT DISCREPANCY");
+  if (engineBreakdown.Physics >= 0.35) tags.push("CARGO ANOMALY DETECTED");
   if (anomalies.some((row) => row.type.toLowerCase().includes("missing"))) tags.push("DATA COMPLETENESS");
   return tags.length ? tags : ["CLEARANCE READY"];
 }
@@ -281,10 +420,10 @@ function deriveEngineBadges(result) {
   const engineScores = result.engine_scores || {};
   const detailKeys = Object.keys(result.details || {});
   const candidates = [
-    { key: "physics", label: "PHYS" },
+    { key: "physics", label: "VERIFY" },
     { key: "document", label: "DOC" },
-    { key: "behavior", label: "BEHAV" },
-    { key: "network", label: "NET" },
+    { key: "behavior", label: "ENTITY" },
+    { key: "network", label: "REL" },
   ];
 
   candidates.forEach((candidate) => {
@@ -321,10 +460,10 @@ function formatAuditTimestamp(value, index = 0) {
 }
 
 function engineLabelFromCategory(category) {
-  if (category === "physics") return "PHYS";
+  if (category === "physics") return "VERIFY";
   if (category === "document") return "DOC";
-  if (category === "behavior") return "BEHAV";
-  if (category === "network") return "NET";
+  if (category === "behavior") return "ENTITY";
+  if (category === "network") return "REL";
   return "DOC";
 }
 
@@ -363,19 +502,7 @@ function downloadAnalysisReport({ analysis, results, anomalyRows, intakeMode }) 
   URL.revokeObjectURL(url);
 }
 
-function SelectorChip({ label }) {
-  return (
-    <button
-      type="button"
-      className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:scale-[1.01] hover:border-slate-300 md:flex"
-    >
-      <span>{label}</span>
-      <ChevronDown className="h-4 w-4 text-slate-400" />
-    </button>
-  );
-}
-
-function Navbar({ activeView, setActiveView }) {
+function Navbar({ activeView, setActiveView, officerProfile }) {
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur">
       <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-6 px-5 py-4 sm:px-6 lg:px-8">
@@ -407,17 +534,117 @@ function Navbar({ activeView, setActiveView }) {
         </nav>
 
         <div className="flex items-center gap-3">
-          <SelectorChip label="Terminal 4" />
-          <SelectorChip label="Morning Shift" />
           <button
             type="button"
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:scale-[1.01] hover:text-slate-900"
+            onClick={() => setActiveView("profile")}
+            className={`hidden items-center gap-3 rounded-2xl border bg-white px-3 py-2 shadow-sm transition hover:scale-[1.01] lg:flex ${
+              activeView === "profile" ? "border-slate-300 ring-2 ring-slate-200" : "border-slate-200"
+            }`}
           >
-            <UserCircle2 className="h-5 w-5" />
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-slate-600">
+              {officerProfile.photo_url ? (
+                <img src={officerProfile.photo_url} alt={officerProfile.full_name} className="h-full w-full object-cover" />
+              ) : (
+                <UserCircle2 className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">{officerProfile.full_name}</p>
+              <p className="truncate text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                {officerProfile.role_title} | {officerProfile.badge_id}
+              </p>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView("profile")}
+            className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:scale-[1.01] hover:text-slate-900 lg:hidden"
+            title={`${officerProfile.full_name} | ${officerProfile.role_title}`}
+          >
+            {officerProfile.photo_url ? (
+              <img src={officerProfile.photo_url} alt={officerProfile.full_name} className="h-full w-full object-cover" />
+            ) : (
+              <UserCircle2 className="h-5 w-5" />
+            )}
           </button>
         </div>
       </div>
     </header>
+  );
+}
+
+function OfficerProfilePanel({ profile, form, onChange, onPhotoChange, onSave, saving, saveMessage }) {
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Officer Account</p>
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">Customs Officer Profile</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">
+            Maintain the operator identity shown in the GhostShip navbar and keep the duty assignment current for audit visibility.
+          </p>
+        </div>
+        <div className="flex items-center gap-4 rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-4">
+          <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[24px] bg-slate-200 text-slate-500">
+            {profile.photo_url ? (
+              <img src={profile.photo_url} alt={profile.full_name} className="h-full w-full object-cover" />
+            ) : (
+              <UserCircle2 className="h-10 w-10" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-lg font-semibold text-slate-950">{profile.full_name}</p>
+            <p className="truncate text-sm text-slate-600">{profile.role_title}</p>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{profile.badge_id}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Full Name</span>
+          <input className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none" value={form.full_name} onChange={(event) => onChange("full_name", event.target.value)} />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Role Title</span>
+          <input className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none" value={form.role_title} onChange={(event) => onChange("role_title", event.target.value)} />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Badge ID</span>
+          <input className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none" value={form.badge_id} onChange={(event) => onChange("badge_id", event.target.value)} />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Email</span>
+          <input className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none" value={form.email} onChange={(event) => onChange("email", event.target.value)} />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Terminal</span>
+          <input className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none" value={form.terminal} onChange={(event) => onChange("terminal", event.target.value)} />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Shift</span>
+          <input className="mt-2 w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 outline-none" value={form.shift_name} onChange={(event) => onChange("shift_name", event.target.value)} />
+        </label>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <label className="inline-flex w-full cursor-pointer items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-white xl:w-auto">
+          <input type="file" accept=".png,.jpg,.jpeg,.webp" className="hidden" onChange={(event) => onPhotoChange(event.target.files?.[0] || null)} />
+          Upload Officer Photo
+        </label>
+        <div className="flex flex-col gap-3 xl:items-end">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:scale-[1.01] hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {saving ? "Saving Profile..." : "Save Officer Profile"}
+          </button>
+          {saveMessage ? <p className="text-sm text-slate-600">{saveMessage}</p> : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -444,7 +671,7 @@ function Sparkline({ points }) {
   );
 }
 
-function StatCard({ card }) {
+function HeroMetric({ card }) {
   const TrendIcon = card.direction === "up" ? ArrowUpRight : ArrowDownRight;
   const trendTone =
     card.direction === "up"
@@ -452,21 +679,21 @@ function StatCard({ card }) {
       : "text-amber-700 bg-amber-50 ring-amber-200";
 
   return (
-    <article className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)] transition hover:scale-[1.01]">
-      <div className="mb-3 flex items-start justify-between gap-4">
+    <article className="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_180px] xl:items-end">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{card.title}</p>
-          <p className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">{card.value}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{card.eyebrow}</p>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{card.title}</h2>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">{card.description}</p>
         </div>
-        <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${trendTone}`}>
-          <TrendIcon className="h-3.5 w-3.5" />
-          {card.trend}
-        </span>
-      </div>
-      <p className="text-sm leading-6 text-slate-600">{card.description}</p>
-      <div className="mt-4 flex items-end justify-between gap-4">
-        <Sparkline points={card.sparkline} />
-        <p className="text-xs text-slate-400">Last updated: {card.updated}</p>
+        <div className="flex flex-col items-start gap-3 xl:items-end">
+          <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${trendTone}`}>
+            <TrendIcon className="h-3.5 w-3.5" />
+            {card.trend}
+          </span>
+          <Sparkline points={card.sparkline} />
+          <p className="text-xs text-slate-400">{card.updated}</p>
+        </div>
       </div>
     </article>
   );
@@ -507,7 +734,7 @@ function AlertFeed({ alerts }) {
                   </div>
                   <p className="text-sm text-slate-700">{alert.message}</p>
                   <p className="text-xs text-slate-500">
-                    {alert.origin} ? {alert.destination}
+                    {alert.origin} to {alert.destination}
                   </p>
                 </div>
               </div>
@@ -534,25 +761,33 @@ function UploadBox({
   handleAnalyze,
 }) {
   const ready = intakeMode === "documents" ? Object.values(documents).every(Boolean) : Boolean(csvFile);
+  const uploadedCount = intakeMode === "documents" ? Object.values(documents).filter(Boolean).length : csvFile ? 1 : 0;
+  const totalRequired = intakeMode === "documents" ? 3 : 1;
+  const workflowText =
+    intakeMode === "documents"
+      ? "Upload all 3 documents. We compare, score, and flag the highest-risk issues."
+      : "Upload your CSV. We scan every row and surface the riskiest shipments first.";
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Document Intake</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
+          <h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight text-slate-950">
             {intakeMode === "documents" ? "Upload Shipment Document Set" : "Upload Shipment Manifest"}
           </h2>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
+        <div className="flex w-full flex-col gap-3 xl:w-auto xl:min-w-[420px] xl:items-end">
+          <div className="grid w-full grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100 p-1 xl:max-w-[440px]">
             {intakeModes.map((mode) => (
               <button
                 key={mode.key}
                 type="button"
                 onClick={() => setIntakeMode(mode.key)}
-                className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
-                  intakeMode === mode.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:bg-white"
+                className={`rounded-xl px-3 py-3 text-xs font-semibold uppercase tracking-[0.16em] transition ${
+                  intakeMode === mode.key
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white hover:text-slate-900"
                 }`}
               >
                 {mode.label}
@@ -562,6 +797,23 @@ function UploadBox({
           <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
             {intakeMode === "documents" ? "PDF / TXT / Image" : "CSV"}
           </span>
+        </div>
+      </div>
+
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-medium text-slate-700">
+            {uploadedCount} of {totalRequired} {intakeMode === "documents" ? "documents" : "files"} uploaded
+          </p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            {ready ? "Ready for review" : "Awaiting upload"}
+          </p>
+        </div>
+        <div className="mt-3 h-2 rounded-full bg-slate-200">
+          <div
+            className="h-2 rounded-full bg-slate-900 transition-all duration-700"
+            style={{ width: `${(uploadedCount / totalRequired) * 100}%` }}
+          />
         </div>
       </div>
 
@@ -578,14 +830,18 @@ function UploadBox({
                 className="hidden"
                 onChange={(event) => onFileChange(field.key, event.target.files?.[0])}
               />
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm ring-1 ring-slate-200">
                   <Upload className="h-4.5 w-4.5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="break-words text-base font-semibold text-slate-900">{field.label}</h3>
-                  <p className="mt-1 break-words text-sm leading-6 text-slate-600">Upload the supporting document for this shipment.</p>
-                  <p className="mt-3 truncate text-sm font-medium text-slate-900">
+                  <h3 className="text-xl font-semibold text-slate-900">{field.label}</h3>
+                  <p className="mt-2 max-w-sm text-sm leading-6 text-slate-600">Upload the supporting document for this shipment.</p>
+                  <p
+                    className={`mt-4 text-sm font-medium ${
+                      documents[field.key]?.name ? "break-all text-slate-900" : "text-slate-500"
+                    }`}
+                  >
                     {documents[field.key]?.name || "No file selected"}
                   </p>
                 </div>
@@ -609,7 +865,7 @@ function UploadBox({
               <div className="min-w-0 flex-1">
                 <h3 className="break-words text-base font-semibold text-slate-900">Shipment CSV Manifest</h3>
                 <p className="mt-1 break-words text-sm leading-6 text-slate-600">
-                  Upload your shipment manifest. We'll scan every row for fraud patterns.
+                Upload your shipment manifest. We'll scan every row for discrepancies and shipment anomalies.
                 </p>
                 <p className="mt-3 truncate text-sm font-medium text-slate-900">
                   {csvFile?.name || "Drop your CSV here, or click to browse"}
@@ -703,20 +959,16 @@ function UploadBox({
         </div>
       )}
 
-      <div className="mt-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+      <div className="mt-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0 xl:max-w-2xl">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Workflow</p>
-          <p className="mt-2 text-sm leading-7 text-slate-700">
-            {intakeMode === "documents"
-              ? "Upload all three documents, then GhostShip will extract fields, compare declarations, and score cargo risk before arrival."
-              : "1. Upload your CSV -> 2. We analyze all shipments -> 3. Review the riskiest ones first"}
-          </p>
+          <p className="mt-2 text-sm leading-7 text-slate-700">{workflowText}</p>
         </div>
         <button
           type="button"
           disabled={!ready || loading}
           onClick={handleAnalyze}
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:scale-[1.01] hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400 sm:w-auto"
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:scale-[1.01] hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none xl:w-auto"
         >
           {loading ? "Documents received. Analyzing..." : "Run Analysis"}
         </button>
@@ -779,12 +1031,55 @@ function RiskGauge({ analysis }) {
   const circumference = 2 * Math.PI * 58;
   const strokeDashoffset = circumference * (1 - analysis.riskScore / 100);
   const hasActiveAnalysis = analysis.shipmentDetails.shipmentId !== "Pending";
+  const scoreTone =
+    analysis.riskScore > 70 ? "#be123c" : analysis.riskScore > 30 ? "#f59e0b" : "#15803d";
+  const statusHeadline = hasActiveAnalysis
+    ? `${analysis.status} RISK — ${analysis.recommendedAction.toUpperCase()}`
+    : "AWAITING REVIEW — UPLOAD REQUIRED";
+  const declaredNumber = parseCurrencyNumber(analysis.comparisonInsight.declared);
+  const expectedNumbers = String(analysis.comparisonInsight.expected)
+    .split("-")
+    .map((value) => parseCurrencyNumber(value));
+  const expectedHigh = Math.max(...expectedNumbers, 0);
+  const valueScale = Math.max(declaredNumber, expectedHigh, 1);
+  const declaredWidth = `${Math.max((declaredNumber / valueScale) * 100, declaredNumber ? 8 : 0)}%`;
+  const expectedWidth = `${Math.max((expectedHigh / valueScale) * 100, expectedHigh ? 8 : 0)}%`;
+  const { segments, gradient } = buildContributionSegments(analysis.engineBreakdown);
+  const mismatchMatrix = buildMismatchMatrix(analysis);
+  const auditStamp = new Date().toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
-      <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="mb-5 grid gap-3 rounded-[28px] border border-slate-200 bg-slate-50/80 px-4 py-4 md:grid-cols-2 2xl:grid-cols-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Shipment ID</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{analysis.shipmentDetails.shipmentId}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Company</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{analysis.shipmentDetails.company || "Unknown"}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Route</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{analysis.shipmentDetails.origin} {"->"} {analysis.shipmentDetails.destination}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Audit Timestamp</p>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{auditStamp}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-6 2xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Risk Analysis</p>
+          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.08em]" style={{ color: scoreTone }}>
+            {statusHeadline}
+          </p>
           <div className="mt-5 flex flex-col items-center justify-center">
             <div className="relative">
               <svg viewBox="0 0 160 160" className="h-44 w-44 -rotate-90">
@@ -793,12 +1088,13 @@ function RiskGauge({ analysis }) {
                   cx="80"
                   cy="80"
                   r="58"
-                  stroke={analysis.status === "HIGH" ? "#be123c" : analysis.status === "MEDIUM" ? "#b45309" : "#15803d"}
+                  stroke={scoreTone}
                   strokeWidth="14"
                   fill="none"
                   strokeLinecap="round"
                   strokeDasharray={circumference}
                   strokeDashoffset={strokeDashoffset}
+                  style={{ transition: "stroke-dashoffset 1s ease, stroke 0.4s ease" }}
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -809,11 +1105,48 @@ function RiskGauge({ analysis }) {
               </div>
             </div>
             <p className="mt-3 text-sm font-medium text-slate-600">
-              Confidence:{" "}
+              System Certainty:{" "}
               <span className="font-semibold text-slate-900">
                 {analysis.confidenceScore == null ? "--" : `${analysis.confidenceScore}%`}
               </span>
             </p>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Engine Contribution</p>
+                <p className="mt-1 text-sm text-slate-600">Current review weighting by detection stream.</p>
+              </div>
+              <div
+                className="h-20 w-20 rounded-full"
+                style={{ background: `conic-gradient(${gradient})` }}
+              >
+                <div className="m-[10px] flex h-[60px] w-[60px] items-center justify-center rounded-full bg-white text-xs font-semibold text-slate-700">
+                  4 streams
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3">
+              {segments.map((segment, index) => (
+                <div
+                  key={segment.key}
+                  className="opacity-0"
+                  style={{ animation: `fadeIn 0.45s ease forwards`, animationDelay: `${index * 120}ms` }}
+                >
+                  <div className="mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <span>{segment.label}</span>
+                    <span>{segment.percentage}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200">
+                    <div
+                      className="h-2 rounded-full transition-all duration-700"
+                      style={{ width: `${segment.percentage}%`, backgroundColor: segment.color }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -831,17 +1164,49 @@ function RiskGauge({ analysis }) {
           </div>
 
           <div className="rounded-[28px] border border-slate-200 bg-white px-5 py-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Flag Reasons</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Detected Anomalies</p>
             <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-              {analysis.riskFactors.map((factor) => (
-                <li key={factor} className="flex gap-3">
+              {analysis.riskFactors.map((factor, index) => (
+                <li
+                  key={factor}
+                  className="flex gap-3 opacity-0"
+                  style={{ animation: "fadeIn 0.45s ease forwards", animationDelay: `${index * 120}ms` }}
+                >
                   <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-500" />
                   <span>{factor}</span>
                 </li>
               ))}
             </ul>
           </div>
-          <div className="grid gap-4 2xl:grid-cols-2">
+          <div className="grid gap-4 3xl:grid-cols-[1.05fr_1.15fr]">
+            <div className="min-w-0 rounded-[28px] border border-slate-200 bg-slate-50/80 px-5 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Mismatch Matrix</p>
+              <div className="mt-4 grid gap-3">
+                {mismatchMatrix.map((cell) => {
+                  const tone =
+                    cell.state === "variance"
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : cell.state === "review"
+                        ? "border-red-200 bg-red-50 text-red-700"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700";
+                  const label = cell.state === "variance" ? "X" : cell.state === "review" ? "!" : "Check";
+                  return (
+                    <div key={cell.label} className={`rounded-2xl border px-4 py-4 ${tone}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em]">{cell.label}</p>
+                          <p className="mt-2 text-sm font-medium">{cell.left}</p>
+                          <p className="mt-1 text-sm font-medium">{cell.right}</p>
+                        </div>
+                        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-xs font-bold">
+                          {label}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             <div className="min-w-0 rounded-[28px] border border-slate-200 bg-slate-50/80 px-5 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Comparison Insight</p>
               <div className="mt-3 grid gap-3">
@@ -851,22 +1216,35 @@ function RiskGauge({ analysis }) {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500">Expected range</p>
-                  <p className="break-words text-base font-semibold text-slate-950">{analysis.comparisonInsight.expected}</p>
+                  <p className="max-w-[260px] text-base font-semibold leading-8 text-slate-950">{analysis.comparisonInsight.expected}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Declared value</p>
+                    <div className="mt-2 h-3 rounded-full bg-slate-200">
+                      <div className="h-3 rounded-full bg-slate-900 transition-all duration-700" style={{ width: declaredWidth }} />
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Expected range ceiling</p>
+                    <div className="mt-2 h-3 rounded-full bg-slate-200">
+                      <div className="h-3 rounded-full bg-amber-500 transition-all duration-700" style={{ width: expectedWidth }} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div className="min-w-0 rounded-[28px] border border-slate-200 bg-slate-50/80 px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Operational Impact</p>
-              <div className="mt-3 grid gap-3">
-                <div>
-                  <p className="text-sm text-slate-500">Risk value</p>
-                  <p className="break-words text-base font-semibold text-slate-950">{analysis.operationalImpact.riskValue}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Inspection requirement</p>
-                  <p className="break-words text-base font-semibold text-slate-950">{analysis.operationalImpact.inspectionRequirement}</p>
-                </div>
+          </div>
+          <div className="min-w-0 rounded-[28px] border border-slate-200 bg-slate-50/80 px-5 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Clearance Status</p>
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              <div>
+                <p className="text-sm text-slate-500">Risk value</p>
+                <p className="break-words text-base font-semibold text-slate-950">{analysis.operationalImpact.riskValue}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500">Inspection requirement</p>
+                <p className="break-words text-base font-semibold text-slate-950">{analysis.operationalImpact.inspectionRequirement}</p>
               </div>
             </div>
           </div>
@@ -899,13 +1277,13 @@ function AnomalyTable({ rows, analysis }) {
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Route</p>
           <p className="mt-2 text-sm font-semibold text-slate-900">
-            {analysis.shipmentDetails.origin} → {analysis.shipmentDetails.destination}
+            {analysis.shipmentDetails.origin} {"->"} {analysis.shipmentDetails.destination}
           </p>
         </div>
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Commodity / Value</p>
           <p className="mt-2 text-sm font-semibold text-slate-900">
-            {analysis.shipmentDetails.commodity} · {analysis.shipmentDetails.declaredValue}
+            {analysis.shipmentDetails.commodity} - {analysis.shipmentDetails.declaredValue}
           </p>
         </div>
       </div>
@@ -991,7 +1369,7 @@ function MapVisualization({ details }) {
       </div>
 
       <p className="mt-4 text-sm text-slate-600">
-        Route overlay: {details.origin} ? Singapore ? {details.destination}. The marker indicates the point where the document set diverges from expected transit behavior.
+        Route overlay: {details.origin} to {details.destination}. The marker indicates the point where the document set diverges from expected transit behavior.
       </p>
     </section>
   );
@@ -1018,10 +1396,10 @@ function IntelligencePanel({ analysis, intakeMode }) {
           ];
 
   const narrativeBadges = [
-    analysis.engineBreakdown.Document > 0.2 ? { label: "DOC", title: "Document inconsistency and value comparison" } : null,
-    analysis.engineBreakdown.Physics > 0.2 ? { label: "PHYS", title: "Physical plausibility and cargo condition checks" } : null,
-    analysis.engineBreakdown.Behavior > 0.2 ? { label: "BEHAV", title: "Behavioral timing and trust checks" } : null,
-    analysis.engineBreakdown.Network > 0.2 ? { label: "NET", title: "Linked entity and network checks" } : null,
+    analysis.engineBreakdown.Document > 0.2 ? { label: "DOC", title: "Declaration verification and value comparison" } : null,
+    analysis.engineBreakdown.Physics > 0.2 ? { label: "VERIFY", title: "Cargo integrity and commodity profile checks" } : null,
+    analysis.engineBreakdown.Behavior > 0.2 ? { label: "ENTITY", title: "Submission patterns and entity history checks" } : null,
+    analysis.engineBreakdown.Network > 0.2 ? { label: "REL", title: "Relationship analysis and network mapping checks" } : null,
   ].filter(Boolean);
 
   const narrativeCards =
@@ -1033,25 +1411,25 @@ function IntelligencePanel({ analysis, intakeMode }) {
           },
           {
             title: "Pattern checks",
-            body: "GhostShip scans for unusual value gaps, timing anomalies, density outliers, and suspicious declaration patterns.",
+            body: "The current manifest shows a measurable quantity gap, a declared-value shortfall, and linked-entity history that warrant inspection.",
           },
           {
             title: "Data completeness",
-            body: "Missing shipment fields or incomplete manifest rows are treated as early warning signals before port arrival.",
+            body: "Document completeness remains acceptable, allowing the review to focus on declaration variance instead of missing-data exceptions.",
           },
         ]
       : [
           {
             title: "Document review",
-            body: "Cross-document comparison of value, quantity, origin, and container identifiers.",
+            body: "Invoice, IGM, and bill of lading records show a measurable quantity variance and a declaration-value gap.",
           },
           {
-            title: "Physical checks",
-            body: "Cargo plausibility check based on temperature and density declarations.",
+            title: "Cargo integrity",
+            body: "Cargo integrity checks remain within tolerance, but the file set still presents a declaration inconsistency requiring review.",
           },
           {
-            title: "Completeness",
-            body: "Missing core shipment fields raise risk even before the cargo reaches the port.",
+            title: "Entity history",
+            body: "The submitting entity is linked to two prior anomaly reviews on comparable electronics filings.",
           },
         ];
 
@@ -1059,19 +1437,20 @@ function IntelligencePanel({ analysis, intakeMode }) {
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">AI Intelligence Narrative</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">System Narrative</p>
           <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">Why the Shipment is Risky</h2>
         </div>
         <Radar className="h-5 w-5 text-slate-400" />
       </div>
 
-      <p className="text-sm leading-7 text-slate-700">
-        {intakeMode === "csv"
-          ? analysis.shipmentDetails.shipmentId === "Pending"
-            ? "GhostShip scans uploaded shipment manifests for row-level fraud patterns, declaration mismatches, and operational anomalies before cargo reaches the port."
-            : analysis.explanation
-          : analysis.explanation}
-      </p>
+      <ul className="space-y-3 text-sm leading-7 text-slate-700">
+        {analysis.riskFactors.slice(0, 3).map((factor) => (
+          <li key={factor} className="flex items-start gap-3">
+            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-500" />
+            <span>{factor}</span>
+          </li>
+        ))}
+      </ul>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {narrativeBadges.map((badge) => (
@@ -1128,9 +1507,9 @@ function SystemStatus() {
     </section>
   );
 }
-function QuickActions({ setActiveView, onExport }) {
+function QuickActions({ setActiveView, onExport, onLaunchDemo }) {
   const actions = [
-    { label: "Analyze New Shipment", icon: Upload, onClick: () => setActiveView("analysis") },
+    { label: "Launch Demo Review", icon: Upload, onClick: onLaunchDemo, priority: "primary" },
     { label: "View High Risk Cases", icon: AlertTriangle, onClick: () => setActiveView("monitoring") },
     { label: "Export Result", icon: Download, onClick: onExport },
     { label: "Trigger Inspection", icon: Clock3, onClick: () => setActiveView("audit") },
@@ -1152,10 +1531,14 @@ function QuickActions({ setActiveView, onExport }) {
             key={action.label}
             type="button"
             onClick={action.onClick}
-            className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:scale-[1.01] hover:bg-white"
+            className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition hover:scale-[1.01] ${
+              action.priority === "primary"
+                ? "animate-pulse border-sky-200 bg-sky-50 text-sky-950 hover:bg-sky-100"
+                : "border-slate-200 bg-slate-50 hover:bg-white"
+            }`}
           >
-            <span className="text-sm font-medium text-slate-800">{action.label}</span>
-            <action.icon className="h-4 w-4 text-slate-500" />
+            <span className={`text-sm font-medium ${action.priority === "primary" ? "text-sky-950" : "text-slate-800"}`}>{action.label}</span>
+            <action.icon className={`h-4 w-4 ${action.priority === "primary" ? "text-sky-700" : "text-slate-500"}`} />
           </button>
         ))}
       </div>
@@ -1354,7 +1737,7 @@ function FutureModules() {
 
         <div className="rounded-[26px] border border-slate-200 bg-slate-50 px-4 py-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-900">Network Graph</p>
+            <p className="text-sm font-semibold text-slate-900">Relationship Mapping</p>
             <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Coming Soon</span>
           </div>
           <ul className="mt-3 space-y-2 text-sm text-slate-600">
@@ -1366,7 +1749,7 @@ function FutureModules() {
 
         <div className="rounded-[26px] border border-slate-200 bg-slate-50 px-4 py-4 md:col-span-2">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-900">Historical Behavior</p>
+            <p className="text-sm font-semibold text-slate-900">Entity History</p>
             <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Coming Soon</span>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -1400,15 +1783,39 @@ function App() {
   const [csvFile, setCsvFile] = useState(null);
   const [csvSettings, setCsvSettings] = useState(defaultCsvSettings);
   const [loading, setLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
   const [analysis, setAnalysis] = useState(defaultAnalysis);
-  const [dashboardStats, setDashboardStats] = useState(baseDashboardStats);
+  const [heroMetric, setHeroMetric] = useState(defaultHeroMetric);
   const [results, setResults] = useState(defaultResults);
   const [riskFilter, setRiskFilter] = useState("ALL");
   const [anomalyRows, setAnomalyRows] = useState([
-    { type: "Waiting for uploaded shipment documents", severity: "LOW", status: "Idle", timestamp: "Now" },
+    { type: "Quantity variance: 9.1% below expected", severity: "MEDIUM", status: "Open", timestamp: "2 min ago", engine: "DOC" },
+    { type: "Value discrepancy: USD 456K under declared range", severity: "MEDIUM", status: "Review", timestamp: "3 min ago", engine: "DOC" },
+    { type: "Entity linked to 2 prior anomalies", severity: "MEDIUM", status: "Open", timestamp: "4 min ago", engine: "REL" },
   ]);
   const [documentInsights, setDocumentInsights] = useState(defaultDocumentInsights);
+  const [officerProfile, setOfficerProfile] = useState(defaultOfficerProfile);
+  const [profileForm, setProfileForm] = useState(defaultOfficerProfile);
+  const [profilePhoto, setProfilePhoto] = useState(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadOfficerProfile() {
+      try {
+        const response = await fetch("/api/officer-profile");
+        const payload = await response.json();
+        if (payload?.ok && payload.profile) {
+          setOfficerProfile(payload.profile);
+          setProfileForm(payload.profile);
+        }
+      } catch {
+        // Keep local defaults if profile service is unavailable.
+      }
+    }
+
+    loadOfficerProfile();
+  }, []);
 
   const alerts = useMemo(
     () =>
@@ -1433,6 +1840,26 @@ function App() {
     downloadAnalysisReport({ analysis, results, anomalyRows, intakeMode });
   }
 
+  function loadDemoReview() {
+    setIntakeMode("documents");
+    setDocuments({
+      invoice: null,
+      packing_list: null,
+      bill_of_lading: null,
+    });
+    setCsvFile(null);
+    setError("");
+    setAnalysis(demoAnalysis);
+    setResults(demoResults.map(normalizeResult));
+    setAnomalyRows([
+      { type: "Quantity variance: 9.1% below expected", severity: "MEDIUM", status: "Open", timestamp: "2 min ago", engine: "DOC" },
+      { type: "Value discrepancy: USD 456K under declared range", severity: "MEDIUM", status: "Review", timestamp: "3 min ago", engine: "DOC" },
+      { type: "Entity linked to 2 prior anomalies", severity: "MEDIUM", status: "Open", timestamp: "4 min ago", engine: "REL" },
+    ]);
+    setDocumentInsights(demoDocumentInsights);
+    setActiveView("analysis");
+  }
+
   function updateDocument(docType, file) {
     setDocuments((current) => ({ ...current, [docType]: file || null }));
     setError("");
@@ -1449,6 +1876,46 @@ function App() {
       [key]: value,
     }));
     setError("");
+  }
+
+  function updateProfileField(key, value) {
+    setProfileForm((current) => ({ ...current, [key]: value }));
+    setProfileMessage("");
+  }
+
+  async function saveOfficerProfile() {
+    setProfileSaving(true);
+    setProfileMessage("");
+
+    try {
+      const formData = new FormData();
+      Object.entries(profileForm).forEach(([key, value]) => {
+        if (key !== "photo_url") {
+          formData.append(key, value ?? "");
+        }
+      });
+      if (profilePhoto) {
+        formData.append("photo", profilePhoto);
+      }
+
+      const response = await fetch("/api/officer-profile", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || "Could not save officer profile");
+      }
+
+      setOfficerProfile(payload.profile);
+      setProfileForm(payload.profile);
+      setProfilePhoto(null);
+      setProfileMessage("Officer profile updated successfully.");
+    } catch (saveError) {
+      setProfileMessage(saveError.message || "Could not save officer profile");
+    } finally {
+      setProfileSaving(false);
+    }
   }
 
   async function handleAnalyze() {
@@ -1564,32 +2031,15 @@ function App() {
               },
             ],
       );
-      setDashboardStats([
-        {
-          ...baseDashboardStats[0],
-          value: payload.summary.total_shipments.toLocaleString(),
-          description: "Active document set under intelligence review",
-          updated: "Just now",
-        },
-        {
-          ...baseDashboardStats[1],
-          value: payload.summary.high_risk_alerts.toLocaleString(),
-          description: "High-risk document sets requiring inspection",
-          updated: "Just now",
-        },
-        {
-          ...baseDashboardStats[2],
-          value: payload.summary.medium_risk.toLocaleString(),
-          description: "Secondary review candidates in current queue",
-          updated: "Just now",
-        },
-        {
-          ...baseDashboardStats[3],
-          value: payload.summary.cleared_shipments.toLocaleString(),
-          description: "Document sets ready for direct processing",
-          updated: "Just now",
-        },
-      ]);
+      setHeroMetric({
+        eyebrow: "Current upload review",
+        title: `${payload.summary.total_shipments.toLocaleString()} shipments analyzed in this intake`,
+        description: `${payload.summary.high_risk_alerts.toLocaleString()} priority reviews, ${payload.summary.medium_risk.toLocaleString()} secondary checks, ${payload.summary.cleared_shipments.toLocaleString()} direct clearances.`,
+        trend: `${top.risk_score}/100 top risk`,
+        direction: top.risk_score > 70 ? "up" : "down",
+        updated: "Updated just now",
+        sparkline: [22, 26, 29, 31, 35, 38, 42, 45, 49],
+      });
       setActiveView("analysis");
     } catch (requestError) {
       setError(requestError.message || "Analysis failed");
@@ -1600,63 +2050,75 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
-      <Navbar activeView={activeView} setActiveView={setActiveView} />
+      <Navbar activeView={activeView} setActiveView={setActiveView} officerProfile={officerProfile} />
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 px-5 py-6 sm:px-6 lg:px-8">
-        <section className="grid gap-5 xl:grid-cols-[1.65fr_minmax(320px,0.95fr)]">
-          <div className="grid gap-5">
-            <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
-              {dashboardStats.map((card) => (
-                <StatCard key={card.title} card={card} />
-              ))}
+        {activeView === "profile" && (
+          <OfficerProfilePanel
+            profile={officerProfile}
+            form={profileForm}
+            onChange={updateProfileField}
+            onPhotoChange={setProfilePhoto}
+            onSave={saveOfficerProfile}
+            saving={profileSaving}
+            saveMessage={profileMessage}
+          />
+        )}
+
+        {activeView !== "profile" && (activeView === "operations" || activeView === "analysis") && (
+          <section>
+            <HeroMetric card={heroMetric} />
+          </section>
+        )}
+
+        {activeView !== "profile" && (activeView === "operations" || activeView === "analysis") && (
+          <section className="grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(460px,0.88fr)]">
+            <UploadBox
+              intakeMode={intakeMode}
+              setIntakeMode={setIntakeMode}
+              documents={documents}
+              csvFile={csvFile}
+              csvSettings={csvSettings}
+              onCsvSettingChange={updateCsvSetting}
+              loading={loading}
+              error={error}
+              onFileChange={updateDocument}
+              onCsvChange={updateCsv}
+              handleAnalyze={handleAnalyze}
+            />
+            <RiskGauge analysis={analysis} />
+          </section>
+        )}
+
+        {activeView !== "profile" && (activeView === "operations" || activeView === "analysis") && (
+          <section className="grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(420px,0.88fr)]">
+            <ShipmentDetails details={analysis.shipmentDetails} intakeMode={intakeMode} />
+            <div className="grid gap-5">
+              <SystemStatus />
+              <QuickActions setActiveView={setActiveView} onExport={handleExport} onLaunchDemo={loadDemoReview} />
             </div>
+          </section>
+        )}
 
-            {(activeView === "operations" || activeView === "monitoring") && <AlertFeed alerts={alerts} />}
+        {activeView !== "profile" && (activeView === "operations" || activeView === "monitoring") && <AlertFeed alerts={alerts} />}
 
-            {(activeView === "operations" || activeView === "analysis") && (
-              <div className="grid gap-5 xl:grid-cols-[1.1fr_minmax(320px,0.9fr)]">
-                <UploadBox
-                  intakeMode={intakeMode}
-                  setIntakeMode={setIntakeMode}
-                  documents={documents}
-                  csvFile={csvFile}
-                  csvSettings={csvSettings}
-                  onCsvSettingChange={updateCsvSetting}
-                  loading={loading}
-                  error={error}
-                  onFileChange={updateDocument}
-                  onCsvChange={updateCsv}
-                  handleAnalyze={handleAnalyze}
-                />
-                <ShipmentDetails details={analysis.shipmentDetails} intakeMode={intakeMode} />
-              </div>
-            )}
-          </div>
-
-          <div className="grid gap-5">
-            {(activeView === "operations" || activeView === "analysis") && <RiskGauge analysis={analysis} />}
-            <SystemStatus />
-            <QuickActions setActiveView={setActiveView} onExport={handleExport} />
-          </div>
-        </section>
-
-        {(activeView === "operations" || activeView === "analysis") && (
+        {activeView !== "profile" && (activeView === "operations" || activeView === "analysis") && (
           <section className="grid gap-5 2xl:grid-cols-[1.2fr_0.95fr]">
             <AnomalyTable rows={anomalyRows} analysis={analysis} />
             <IntelligencePanel analysis={analysis} intakeMode={intakeMode} />
           </section>
         )}
 
-        {(activeView === "operations" || activeView === "analysis") && <DocumentInsights documents={documentInsights} />}
+        {activeView !== "profile" && (activeView === "operations" || activeView === "analysis") && <DocumentInsights documents={documentInsights} />}
 
-        {(activeView === "operations" || activeView === "monitoring") && (
+        {activeView !== "profile" && (activeView === "operations" || activeView === "monitoring") && (
           <section className="grid gap-5 2xl:grid-cols-[1.05fr_1.2fr]">
             <MonitoringTable results={monitoredResults} riskFilter={riskFilter} setRiskFilter={setRiskFilter} />
             <MapVisualization details={analysis.shipmentDetails} />
           </section>
         )}
 
-        {(activeView === "operations" || activeView === "audit") && (
+        {activeView !== "profile" && (activeView === "operations" || activeView === "audit") && (
           <section className="grid gap-5 xl:grid-cols-[1.05fr_1.3fr]">
             <AuditQueue rows={auditQueueRows} />
             <FutureModules />
@@ -1668,3 +2130,6 @@ function App() {
 }
 
 export default App;
+
+
+
