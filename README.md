@@ -17,7 +17,7 @@ Ports handle thousands of containers daily. Fraud now occurs through data manipu
 - ML Model (RandomForest, 300 estimators)
 - AI Explanations (human-readable risk reasoning)
 - Risk Scoring (0-100, Low/Medium/High)
-- Real-time Supabase Integration
+- CSV + document intake via Flask API
 
 ## Quick Start
 
@@ -25,6 +25,15 @@ Ports handle thousands of containers daily. Fraud now occurs through data manipu
 pip install -r requirements.txt
 python main.py --train
 python main.py --demo
+```
+
+## API + Frontend (Optional)
+
+```bash
+python api.py
+cd frontend
+npm install
+npm run dev
 ```
 
 ## Demo Scenarios
@@ -52,8 +61,20 @@ python main.py --demo
 └─────────────────────────────────────┘
 ```
 
+## Repo Layout
+
+```text
+ghostship/   # Python backend package (engines, ML, API, demo)
+frontend/    # React + Vite UI (proxies /api to Flask)
+requirements.txt
+api.py       # Entrypoint shim (runs ghostship.api)
+main.py      # Entrypoint shim (runs ghostship.main)
+train.py     # Entrypoint shim (runs ghostship.train)
+```
+
 ## Tech Stack
 - Python 3.9+
-- Supabase (PostgreSQL)
 - scikit-learn
 - pandas, numpy
+- Flask (API)
+- React + Vite + Tailwind (frontend)

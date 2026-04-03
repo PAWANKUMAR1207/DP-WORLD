@@ -4,8 +4,7 @@
 - [x] Folder structure created
 - [x] Dependencies installed
 - [x] CSV-based training flow configured
-- [x] Supabase Node connectivity confirmed
-- [x] Python Supabase issue identified as key compatibility
+- [x] Local/offline workflow confirmed (no external DB required)
 
 ## ML Model
 - [x] Feature extraction from 16 fields
@@ -25,7 +24,7 @@
 - [x] Initial CSV dataset loaded
 - [x] Updated dataset loaded: 1150 rows
 - [x] Fraud/normal balance confirmed in updated CSV
-- [x] Local training works without Supabase
+- [x] Local training works fully offline
 
 ## AI Layer
 - [x] Human-readable explanations
@@ -38,7 +37,7 @@
 - [x] Document and behavior signals are strongest in the trained model
 - [x] Physics and network signals remain comparatively weak in ML importance
 - [x] Project is fully usable offline
-- [ ] Supabase Python integration still needs a compatible API key
+- [ ] Future: connect live data source (not implemented)
 
 ## Recent Changes
 - [x] Added ML features: `temperature_anomaly`, `density_anomaly`, `route_risk_score`

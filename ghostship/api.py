@@ -1,0 +1,166 @@
+from io import BytesIO
+import json
+
+import pandas as pd
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+
+from .document_analysis import DocumentProcessingError, analyze_document_set
+from .main import normalize_analysis_settings, summarize_shipments
+
+app = Flask(__name__)
+CORS(app)
+
+
+DOCUMENT_FIELDS = ("invoice", "packing_list", "bill_of_lading")
+CSV_COLUMN_ALIASES = {
+    "shipment_id": ["shipment_i", "shipmentid", "shipment"],
+    "company_id": ["company_i", "companyid"],
+    "company_name": ["company", "company_n", "company_name"],
+    "commodity": ["product", "commodity_type"],
+    "weight_kg": ["weight", "gross_weight", "gross_weight_kg"],
+    "declared_value_usd": ["declared_v", "declared_value", "declared_val"],
+    "physical_value_usd": ["physical_va", "physical_value", "physical_val"],
+    "igm_quantity": ["igm_quanti", "igm_qty"],
+    "bol_quantity": ["bol_quanti", "bol_qty"],
+    "invoice_quantity": ["invoice_qu", "invoice_qty", "invoice_quant"],
+    "igm_value": ["igm_val", "igmvalue"],
+    "bol_value": ["bol_val", "bolvalue"],
+    "invoice_value": ["invoice_val", "invoicevalue"],
+    "actual_origin_country": ["actual_orig", "actual_o", "actual_origin"],
+    "declared_origin_country": ["declared_orig", "declared_o", "declared_origin"],
+    "route": ["route_name"],
+    "route_risk_score": ["route_risk", "route_risk_s"],
+    "account_age_days": ["account_ag", "account_age"],
+    "company_trust_score": ["company_t", "trust_score", "company_tr"],
+    "kyc_verified": ["kyc_verifie", "kyc_verified_flag"],
+    "submission_hour": ["submission", "submission_h", "submitted_hour"],
+    "burst_count": ["burst_coun", "burst_cnt"],
+    "linked_company_id": ["linked_com", "linked_company"],
+    "shared_director_flag": ["shared_dir", "shared_director"],
+    "pickup_attempts": ["pickup_att", "pickup_attempt"],
+    "driver_verified": ["driver_veri", "driver_verified_flag"],
+    "risk_score": ["risk_scor"],
+    "is_anomalous": ["is_anomal", "is_anomaly", "anomaly_flag"],
+    "fraud_type": ["fraud_typ"],
+    "temperature_celsius": ["temperatu", "temperature", "temp_c", "temperature_c"],
+    "volume_cbm": ["volume_cb", "volume", "cbm"],
+    "corrected_physics_anomaly": ["corrected_1", "corrected_physics_an"],
+    "anomaly_reason": ["anomaly_r", "anomaly_reason"],
+    "director_id": ["director_ids", "director_i"],
+}
+
+
+def _canonicalize_column_name(name):
+    return "".join(ch for ch in str(name).strip().lower() if ch.isalnum())
+
+
+def _normalize_dataframe_columns(dataframe):
+    column_lookup = {_canonicalize_column_name(column): column for column in dataframe.columns}
+    rename_map = {}
+
+    for canonical_name, aliases in CSV_COLUMN_ALIASES.items():
+        if canonical_name in dataframe.columns:
+            continue
+
+        canonical_key = _canonicalize_column_name(canonical_name)
+        source_column = column_lookup.get(canonical_key)
+        if source_column is None:
+            for alias in aliases:
+                source_column = column_lookup.get(_canonicalize_column_name(alias))
+                if source_column is not None:
+                    break
+
+        if source_column is not None:
+            rename_map[source_column] = canonical_name
+
+    return dataframe.rename(columns=rename_map)
+
+
+def _normalize_records(dataframe):
+    normalized = _normalize_dataframe_columns(dataframe)
+    return normalized.where(pd.notnull(normalized), None).to_dict(orient="records")
+
+
+@app.get("/")
+def index():
+    return jsonify(
+        {
+            "ok": True,
+            "message": "GhostShip API is running",
+            "frontend_url": "http://127.0.0.1:5173",
+            "endpoints": ["/api/health", "/api/analyze", "/api/analyze-documents"],
+        }
+    )
+
+
+@app.get("/api/health")
+def health():
+    return jsonify({"ok": True, "message": "GhostShip API available"})
+
+
+@app.post("/api/analyze")
+def analyze_csv():
+    if "file" not in request.files:
+        return jsonify({"ok": False, "message": "CSV file is required"}), 400
+
+    uploaded_file = request.files["file"]
+    if not uploaded_file.filename:
+        return jsonify({"ok": False, "message": "No file selected"}), 400
+
+    raw_settings = request.form.get("settings")
+    try:
+        settings = normalize_analysis_settings(json.loads(raw_settings) if raw_settings else None)
+    except json.JSONDecodeError as error:
+        return jsonify({"ok": False, "message": f"Invalid analysis settings: {error}"}), 400
+
+    try:
+        dataframe = pd.read_csv(BytesIO(uploaded_file.read()))
+    except Exception as error:
+        return jsonify({"ok": False, "message": f"Could not read CSV: {error}"}), 400
+
+    records = _normalize_records(dataframe)
+    if not records:
+        return jsonify({"ok": False, "message": "Uploaded CSV has no shipment rows"}), 400
+
+    try:
+        analysis = summarize_shipments(records, settings=settings)
+    except Exception as error:
+        return jsonify({"ok": False, "message": f"Analysis failed: {error}"}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "file_name": uploaded_file.filename,
+            "rows_processed": len(records),
+            **analysis,
+        }
+    )
+
+
+@app.post("/api/analyze-documents")
+def analyze_documents():
+    missing = [field for field in DOCUMENT_FIELDS if field not in request.files]
+    if missing:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "message": "Required documents missing: " + ", ".join(field.replace("_", " ") for field in missing),
+                }
+            ),
+            400,
+        )
+
+    try:
+        analysis = analyze_document_set({field: request.files[field] for field in DOCUMENT_FIELDS})
+    except DocumentProcessingError as error:
+        return jsonify({"ok": False, "message": str(error)}), 400
+    except Exception as error:
+        return jsonify({"ok": False, "message": f"Document analysis failed: {error}"}), 500
+
+    return jsonify(analysis)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=False)
