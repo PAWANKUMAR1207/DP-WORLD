@@ -1,5 +1,4 @@
 import { useState } from "react";
-import API_BASE from "../utils/config";
 import { LogIn, ShieldCheck, UserPlus } from "lucide-react";
 
 const emptyRegisterForm = {
@@ -19,56 +18,25 @@ export default function AuthPortal({ onLoginSuccess }) {
   const [mode, setMode] = useState("login");
   const [loginForm, setLoginForm] = useState({ user_id: "", password: "" });
   const [registerForm, setRegisterForm] = useState(emptyRegisterForm);
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function handleLogin() {
-    setLoading(true);
-    setMessage("");
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(loginForm),
-      });
-      const text = await response.text();
-      if (!text) throw new Error(`Server returned empty response (HTTP ${response.status})`);
-      const payload = JSON.parse(text);
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.message || "Login failed");
-      }
-      onLoginSuccess(payload.user);
-    } catch (err) {
-      setMessage(err.message || "Login failed");
-    } finally {
-      setLoading(false);
+  const USERS = {
+    manager01: { id: 1, user_id: "manager01", password: "admin123", full_name: "Pawan Kumar", email: "pawan.kumar@dpworld.local", phone: "+91 99999 99999", role_title: "Customs Risk Officer", badge_id: "CM-4172", department: "Customs Risk Office", terminal: "Terminal 4", shift_name: "Morning Shift" },
+    manager02: { id: 2, user_id: "manager02", password: "admin123", full_name: "A. Rahman", email: "a.rahman@dpworld.local", phone: "+91 88888 88888", role_title: "Senior Customs Officer", badge_id: "CM-3091", department: "Customs Risk Office", terminal: "Terminal 2", shift_name: "Evening Shift" },
+  };
+
+  function handleLogin() {
+    const user = USERS[loginForm.user_id];
+    if (!user || user.password !== loginForm.password) {
+      setMessage("Invalid user ID or password");
+      return;
     }
+    onLoginSuccess(user);
   }
 
-  async function handleRegister() {
-    setLoading(true);
-    setMessage("");
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(registerForm),
-      });
-      const text = await response.text();
-      if (!text) throw new Error(`Server returned empty response (HTTP ${response.status})`);
-      const payload = JSON.parse(text);
-      if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.message || "Registration failed");
-      }
-      setMode("login");
-      setLoginForm({ user_id: registerForm.user_id, password: registerForm.password });
-      setMessage("Registration complete. You can sign in with the new user ID and password.");
-      setRegisterForm(emptyRegisterForm);
-    } catch (err) {
-      setMessage(err.message || "Registration failed");
-    } finally {
-      setLoading(false);
-    }
+  function handleRegister() {
+    setMessage("Registration is disabled. Use manager01 / admin123 or manager02 / admin123.");
   }
 
   return (
