@@ -15,11 +15,12 @@ export function useOfficer() {
   const [form, setForm] = useState(defaultOfficerProfile);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const API_URL = import.meta.env.VITE_API_URL || "";
 
   useEffect(() => {
     async function loadOfficerProfile() {
       try {
-        const response = await fetch("/api/officer-profile");
+        const response = await fetch(`${API_URL}/api/officer-profile`);
         const payload = await response.json();
         if (payload?.ok && payload.profile) {
           setProfile(payload.profile);
@@ -53,7 +54,7 @@ export function useOfficer() {
         formData.append("photo", photoFile);
       }
 
-      const response = await fetch("/api/officer-profile", {
+      const response = await fetch(`${API_URL}/api/officer-profile`, {
         method: "POST",
         body: formData,
       });

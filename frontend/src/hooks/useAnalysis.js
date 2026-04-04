@@ -72,6 +72,7 @@ export function useAnalysis() {
   const [results, setResults] = useState(defaultResults);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const API_URL = import.meta.env.VITE_API_URL || "";
 
   const resetAnalysis = useCallback(() => {
     setAnalysis(defaultAnalysis);
@@ -172,7 +173,7 @@ export function useAnalysis() {
         formData.append(key, file);
       });
 
-      const response = await fetch("/api/analyze-documents", {
+      const response = await fetch(`${API_URL}/api/analyze-documents`, {
         method: "POST",
         body: formData,
       });
@@ -204,7 +205,7 @@ export function useAnalysis() {
       formData.append("file", csvFile);
       formData.append("settings", JSON.stringify(settings));
 
-      const response = await fetch("/api/analyze", {
+      const response = await fetch(`${API_URL}/api/analyze`, {
         method: "POST",
         body: formData,
       });
