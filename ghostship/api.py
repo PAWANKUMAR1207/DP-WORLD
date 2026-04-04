@@ -4,7 +4,10 @@ import json
 import structlog
 from io import BytesIO
 from pathlib import Path
-import sqlite3
+import os
+import psycopg2
+from psycopg2.extras import DictCursor
+import contextlib
 
 import pandas as pd
 from flask import Flask, jsonify, request, send_from_directory
@@ -44,21 +47,14 @@ MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB for documents
 MAX_CSV_SIZE = 10 * 1024 * 1024  # 10MB for CSV files
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
-# CORS configuration - restrict to specific origins in production
-CORS(app, resources={
-    r"/api/*": {
-        "origins": ["http://127.0.0.1:5173", "http://localhost:5173"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+# CORS configuration - Allow all for now, but should be restricted in production
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Document fields configuration
 DOCUMENT_FIELDS = ("invoice", "packing_list", "bill_of_lading")
 DOCUMENT_MAX_SIZE = 10 * 1024 * 1024  # 10MB per document
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "ghostship.db"
 UPLOAD_DIR = BASE_DIR / "uploads" / "officers"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -101,57 +97,68 @@ CSV_COLUMN_ALIASES = {
 }
 
 
+@contextlib.contextmanager
 def _db_connection():
-    """Get database connection with row factory."""
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
+    """Get a PostgreSQL database connection."""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
+
+    conn = psycopg2.connect(db_url)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _init_db():
     """Initialize database with officer profile table."""
     with _db_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS officer_profiles (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                full_name TEXT NOT NULL,
-                role_title TEXT NOT NULL,
-                badge_id TEXT NOT NULL,
-                email TEXT,
-                terminal TEXT,
-                shift_name TEXT,
-                photo_path TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        existing = connection.execute("SELECT id FROM officer_profiles WHERE id = 1").fetchone()
-        if existing is None:
-            connection.execute(
+        with connection.cursor() as cursor:
+            cursor.execute(
                 """
-                INSERT INTO officer_profiles (
-                    id, full_name, role_title, badge_id, email, terminal, shift_name, photo_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    1,
-                    "Officer A. Rahman",
-                    "Customs Risk Officer",
-                    "ID CR-4172",
-                    "arahman@ghostship.local",
-                    "Terminal 4",
-                    "Morning Shift",
-                    None,
-                ),
+                CREATE TABLE IF NOT EXISTS officer_profiles (
+                    id INTEGER PRIMARY KEY,
+                    full_name TEXT NOT NULL,
+                    role_title TEXT NOT NULL,
+                    badge_id TEXT NOT NULL,
+                    email TEXT,
+                    terminal TEXT,
+                    shift_name TEXT,
+                    photo_path TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
             )
-            logger.info("initialized_default_officer_profile")
-        connection.commit()
+            cursor.execute("SELECT id FROM officer_profiles WHERE id = 1")
+            existing = cursor.fetchone()
+            if existing is None:
+                cursor.execute(
+                    """
+                    INSERT INTO officer_profiles (
+                        id, full_name, role_title, badge_id, email, terminal, shift_name, photo_path
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        1,
+                        "Officer A. Rahman",
+                        "Customs Risk Officer",
+                        "ID CR-4172",
+                        "arahman@ghostship.local",
+                        "Terminal 4",
+                        "Morning Shift",
+                        None,
+                    ),
+                )
+                logger.info("initialized_default_officer_profile")
+            connection.commit()
 
 
 def _serialize_profile(row):
     """Serialize officer profile from database row."""
+    if not row:
+        return None
     return {
         "full_name": row["full_name"],
         "role_title": row["role_title"],
@@ -166,7 +173,9 @@ def _serialize_profile(row):
 def _get_profile():
     """Get officer profile from database."""
     with _db_connection() as connection:
-        row = connection.execute("SELECT * FROM officer_profiles WHERE id = 1").fetchone()
+        with connection.cursor(cursor_factory=DictCursor) as cursor:
+            cursor.execute("SELECT * FROM officer_profiles WHERE id = 1")
+            row = cursor.fetchone()
     return _serialize_profile(row)
 
 
@@ -309,24 +318,25 @@ def update_officer_profile():
         }
 
         with _db_connection() as connection:
-            connection.execute(
-                """
-                UPDATE officer_profiles
-                SET full_name = ?, role_title = ?, badge_id = ?, 
-                    email = ?, terminal = ?, shift_name = ?, photo_path = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = 1
-                """,
-                (
-                    updated["full_name"],
-                    updated["role_title"],
-                    updated["badge_id"],
-                    updated["email"],
-                    updated["terminal"],
-                    updated["shift_name"],
-                    updated["photo_path"],
-                ),
-            )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE officer_profiles
+                    SET full_name = %s, role_title = %s, badge_id = %s, 
+                        email = %s, terminal = %s, shift_name = %s, photo_path = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                    """,
+                    (
+                        updated["full_name"],
+                        updated["role_title"],
+                        updated["badge_id"],
+                        updated["email"],
+                        updated["terminal"],
+                        updated["shift_name"],
+                        updated["photo_path"],
+                    ),
+                )
             connection.commit()
 
         logger.info("officer_profile_updated", badge_id=updated["badge_id"])
