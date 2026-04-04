@@ -1136,55 +1136,45 @@ def health():
     })
 
 
+_HARDCODED_USERS = {
+    "manager01": {
+        "id": 1,
+        "user_id": "manager01",
+        "password": "admin123",
+        "full_name": "Pawan Kumar",
+        "email": "pawan.kumar@dpworld.local",
+        "phone": "+91 99999 99999",
+        "role_title": "Customs Risk Officer",
+        "badge_id": "CM-4172",
+        "department": "Customs Risk Office",
+        "terminal": "Terminal 4",
+        "shift_name": "Morning Shift",
+    },
+    "manager02": {
+        "id": 2,
+        "user_id": "manager02",
+        "password": "admin123",
+        "full_name": "A. Rahman",
+        "email": "a.rahman@dpworld.local",
+        "phone": "+91 88888 88888",
+        "role_title": "Senior Customs Officer",
+        "badge_id": "CM-3091",
+        "department": "Customs Risk Office",
+        "terminal": "Terminal 2",
+        "shift_name": "Evening Shift",
+    },
+}
+
+
 @app.post("/api/auth/register")
 def register_customs_manager():
-    """Register a customs manager account with plain-text password storage."""
-    try:
-        payload = request.get_json(silent=True) or {}
-        user = _validate_manager_registration(payload)
-        with _db_connection() as connection:
-            existing = _fetchone(
-                connection,
-                "SELECT id FROM customs_manager_users WHERE user_id = ? OR email = ?",
-                (user["user_id"], user["email"]),
-            )
-            if existing is not None:
-                return jsonify({"ok": False, "message": "User ID or email already exists"}), 409
-
-            cursor = _execute(
-                connection,
-                """
-                INSERT INTO customs_manager_users (
-                    user_id, password, full_name, email, phone, role_title, badge_id, department, terminal, shift_name
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user["user_id"],
-                    user["password"],
-                    user["full_name"],
-                    user["email"],
-                    user["phone"],
-                    user["role_title"],
-                    user["badge_id"],
-                    user["department"],
-                    user["terminal"],
-                    user["shift_name"],
-                ),
-            )
-            connection.commit()
-            stored = _fetchone(connection, "SELECT * FROM customs_manager_users WHERE id = ?", (cursor.lastrowid,))
-        return jsonify({
-            "ok": True,
-            "message": "Registration completed. Password is stored exactly as entered.",
-            "user": _serialize_manager_user(stored),
-        }), 201
-    except ValueError as error:
-        return jsonify({"ok": False, "message": str(error)}), 400
+    """Registration is disabled — use hardcoded accounts."""
+    return jsonify({"ok": False, "message": "Registration is disabled. Use manager01 / admin123 or manager02 / admin123 to log in."}), 403
 
 
 @app.post("/api/auth/login")
 def login_customs_manager():
-    """Login using plain-text user ID and password comparison."""
+    """Login against hardcoded user accounts."""
     payload = request.get_json(silent=True) or {}
     user_id = _normalize_text(payload.get("user_id"))
     password = _normalize_text(payload.get("password"))
@@ -1192,9 +1182,7 @@ def login_customs_manager():
     if not user_id or not password:
         return jsonify({"ok": False, "message": "User ID and password are required"}), 400
 
-    with _db_connection() as connection:
-        user = _fetchone(connection, "SELECT * FROM customs_manager_users WHERE user_id = ?", (user_id,))
-
+    user = _HARDCODED_USERS.get(user_id)
     if user is None or user["password"] != password:
         return jsonify({"ok": False, "message": "Invalid user ID or password"}), 401
 
