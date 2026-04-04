@@ -31,7 +31,9 @@ export default function AuthPortal({ onLoginSuccess }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(loginForm),
       });
-      const payload = await response.json();
+      const text = await response.text();
+      if (!text) throw new Error(`Server returned empty response (HTTP ${response.status})`);
+      const payload = JSON.parse(text);
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.message || "Login failed");
       }
@@ -52,7 +54,9 @@ export default function AuthPortal({ onLoginSuccess }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(registerForm),
       });
-      const payload = await response.json();
+      const text = await response.text();
+      if (!text) throw new Error(`Server returned empty response (HTTP ${response.status})`);
+      const payload = JSON.parse(text);
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.message || "Registration failed");
       }
