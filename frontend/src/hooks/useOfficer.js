@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import API_BASE from "../utils/config";
 
 const defaultOfficerProfile = {
   full_name: "Officer A. Rahman",
@@ -40,7 +41,7 @@ export function useOfficer(activeManager = null) {
 
     async function loadOfficerProfile() {
       try {
-        const response = await fetch("/api/officer-profile");
+        const response = await fetch(`${API_BASE}/api/officer-profile`);
         const payload = await response.json();
         if (payload?.ok && payload.profile) {
           setProfile(payload.profile);
@@ -85,7 +86,7 @@ export function useOfficer(activeManager = null) {
         formData.append("photo", photoFile);
       }
 
-      const response = await fetch("/api/officer-profile", {
+      const response = await fetch(`${API_BASE}/api/officer-profile`, {
         method: "POST",
         body: formData,
       });

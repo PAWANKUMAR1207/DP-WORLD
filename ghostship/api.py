@@ -58,7 +58,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 # CORS configuration - restrict to specific origins in production
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://127.0.0.1:5173", "http://localhost:5173"],
+        "origins": os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(","),
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }

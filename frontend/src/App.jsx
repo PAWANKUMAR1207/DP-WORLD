@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import API_BASE from "./utils/config";
 import {
   Navbar,
   AuthPortal,
@@ -233,7 +234,7 @@ export default function App() {
   useEffect(() => {
     async function loadAuditQueue() {
       try {
-        const response = await fetch("/api/audit-queue");
+        const response = await fetch(`${API_BASE}/api/audit-queue`);
         const payload = await response.json();
         if (response.ok && payload?.ok) {
           setAuditRows(payload.rows || []);
@@ -428,7 +429,7 @@ export default function App() {
     setAuditQueueSaving(true);
     setAuditQueueMessage("");
     try {
-      const response = await fetch("/api/audit-queue", {
+      const response = await fetch(`${API_BASE}/api/audit-queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(row),
@@ -450,7 +451,7 @@ export default function App() {
     setAuditQueueSaving(true);
     setAuditQueueMessage("");
     try {
-      const response = await fetch(`/api/audit-queue/${row.id}`, {
+      const response = await fetch(`${API_BASE}/api/audit-queue/${row.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(row),
@@ -472,7 +473,7 @@ export default function App() {
     setAuditQueueSaving(true);
     setAuditQueueMessage("");
     try {
-      const response = await fetch(`/api/audit-queue/${rowId}`, {
+      const response = await fetch(`${API_BASE}/api/audit-queue/${rowId}`, {
         method: "DELETE",
       });
       const payload = await response.json();

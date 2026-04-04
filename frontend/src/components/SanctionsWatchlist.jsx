@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import API_BASE from "../utils/config";
 import {
   AlertTriangle,
   Shield,
@@ -50,7 +51,7 @@ export default function SanctionsWatchlist() {
   useEffect(() => {
     async function loadWatchlist() {
       try {
-        const response = await fetch("/api/sanctions-watchlist");
+        const response = await fetch(`${API_BASE}/api/sanctions-watchlist`);
         const payload = await response.json();
         if (!response.ok || !payload?.ok) {
           throw new Error(payload?.message || "Could not load watchlist");
@@ -113,7 +114,7 @@ export default function SanctionsWatchlist() {
     setSaving(true);
     setMessage("");
     try {
-      const endpoint = isAdding ? "/api/sanctions-watchlist" : `/api/sanctions-watchlist/${editingId}`;
+      const endpoint = isAdding ? `${API_BASE}/api/sanctions-watchlist` : `${API_BASE}/api/sanctions-watchlist/${editingId}`;
       const method = isAdding ? "POST" : "PUT";
       const response = await fetch(endpoint, {
         method,
@@ -145,7 +146,7 @@ export default function SanctionsWatchlist() {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sanctions-watchlist/${entityId}`, { method: "DELETE" });
+      const response = await fetch(`${API_BASE}/api/sanctions-watchlist/${entityId}`, { method: "DELETE" });
       const payload = await response.json();
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.message || "Could not remove entity");

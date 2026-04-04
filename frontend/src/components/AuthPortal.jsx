@@ -1,4 +1,5 @@
 import { useState } from "react";
+import API_BASE from "../utils/config";
 import { LogIn, ShieldCheck, UserPlus } from "lucide-react";
 
 const emptyRegisterForm = {
@@ -25,7 +26,7 @@ export default function AuthPortal({ onLoginSuccess }) {
     setLoading(true);
     setMessage("");
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(loginForm),
@@ -46,7 +47,7 @@ export default function AuthPortal({ onLoginSuccess }) {
     setLoading(true);
     setMessage("");
     try {
-      const response = await fetch("/api/auth/register", {
+      const response = await fetch(`${API_BASE}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(registerForm),
