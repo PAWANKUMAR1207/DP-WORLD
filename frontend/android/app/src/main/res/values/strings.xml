@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ghostship</string>
+    <string name="title_activity_main">ghostship</string>
+    <string name="package_name">com.example.ghostship</string>
+    <string name="custom_url_scheme">com.example.ghostship</string>
+</resources>
