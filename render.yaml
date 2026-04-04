@@ -10,7 +10,7 @@
 services:
   # 1. PostgreSQL Database
   - name: ghostship-db
-    type: psql
+    type: postgres
     # plan: free # optional (defaults to free)
     # See available regions: https://render.com/docs/deploys#regions
     region: ohio
