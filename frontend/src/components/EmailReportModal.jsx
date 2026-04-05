@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Mail, X, Send, CheckCircle, AlertCircle, Loader } from "lucide-react";
 import API_BASE from "../utils/config";
+import { generateReportPDF } from "../utils/generateReportPDF";
 
-export default function EmailReportModal({ analysis, results, onClose }) {
+export default function EmailReportModal({ analysis, results, officerProfile, onClose }) {
   const [toEmail, setToEmail] = useState("");
-  const [status, setStatus] = useState("idle"); // idle | sending | success | error
+  const [status, setStatus] = useState("idle"); // idle | generating | sending | success | error
   const [message, setMessage] = useState("");
 
   async function handleSend() {
@@ -14,22 +15,29 @@ export default function EmailReportModal({ analysis, results, onClose }) {
       return;
     }
 
-    setStatus("sending");
-    setMessage("");
-
     try {
+      // Step 1: generate PDF bytes client-side
+      setStatus("generating");
+      const pdfBuffer = generateReportPDF(analysis, results, officerProfile, true);
+      const pdfBlob = new Blob([pdfBuffer], { type: "application/pdf" });
+      const fileName = `GhostShip_Report_${analysis?.shipmentDetails?.shipmentId || "EXPORT"}_${new Date().toISOString().split("T")[0]}.pdf`;
+
+      // Step 2: send as multipart with PDF attached
+      setStatus("sending");
+      const formData = new FormData();
+      formData.append("to_email", toEmail.trim());
+      formData.append("subject", `GhostShip Report — ${analysis?.status || "UNKNOWN"} Risk (Score: ${analysis?.riskScore ?? 0})`);
+      formData.append("analysis", JSON.stringify(analysis));
+      formData.append("results", JSON.stringify(results));
+      formData.append("pdf", pdfBlob, fileName);
+
       const res = await fetch(`${API_BASE}/api/send-report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to_email: toEmail.trim(),
-          subject: `GhostShip Report — ${analysis?.status || "UNKNOWN"} Risk (Score: ${analysis?.riskScore ?? 0})`,
-          analysis,
-          results,
-        }),
+        body: formData,
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.message || "Send failed");
+
       setStatus("success");
       setMessage(data.message);
     } catch (err) {
@@ -44,6 +52,11 @@ export default function EmailReportModal({ analysis, results, onClose }) {
     LOW: "text-emerald-600",
   }[analysis?.status] || "text-slate-600";
 
+  const statusLabel = {
+    generating: "Generating PDF...",
+    sending: "Sending email...",
+  }[status];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-2xl">
@@ -55,7 +68,7 @@ export default function EmailReportModal({ analysis, results, onClose }) {
             </div>
             <div>
               <h2 className="text-lg font-semibold tracking-tight text-slate-950">Email Report</h2>
-              <p className="text-sm text-slate-500">Send analysis summary via Gmail</p>
+              <p className="text-sm text-slate-500">Sends analysis summary + PDF attachment</p>
             </div>
           </div>
           <button onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100">
@@ -65,7 +78,7 @@ export default function EmailReportModal({ analysis, results, onClose }) {
 
         {/* Analysis preview */}
         <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Report preview</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Report contents</p>
           <div className="mt-2 flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-900">
               {analysis?.shipmentDetails?.shipmentId || "Analysis Summary"}
@@ -75,7 +88,13 @@ export default function EmailReportModal({ analysis, results, onClose }) {
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500 line-clamp-2">{analysis?.recommendedAction}</p>
-          <p className="mt-1 text-xs text-slate-400">{results?.length ?? 0} shipment result{results?.length !== 1 ? "s" : ""} included</p>
+          <div className="mt-2 flex gap-3 text-xs text-slate-400">
+            <span>PDF report attached</span>
+            <span>·</span>
+            <span>{results?.length ?? 0} shipment result{results?.length !== 1 ? "s" : ""}</span>
+            <span>·</span>
+            <span>{analysis?.riskFactors?.length ?? 0} risk factors</span>
+          </div>
         </div>
 
         {/* Email input */}
@@ -86,11 +105,11 @@ export default function EmailReportModal({ analysis, results, onClose }) {
               <input
                 type="email"
                 value={toEmail}
-                onChange={(e) => { setToEmail(e.target.value); setStatus("idle"); setMessage(""); }}
+                onChange={(e) => { setToEmail(e.target.value); if (status === "error") { setStatus("idle"); setMessage(""); } }}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
                 placeholder="officer@port.local"
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-slate-400"
-                disabled={status === "sending"}
+                disabled={status === "generating" || status === "sending"}
               />
             </label>
           </div>
@@ -101,7 +120,9 @@ export default function EmailReportModal({ analysis, results, onClose }) {
           <div className={`mt-3 flex items-start gap-2 rounded-xl px-4 py-3 text-sm ${
             status === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
           }`}>
-            {status === "error" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+            {status === "error"
+              ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              : <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />}
             {message}
           </div>
         )}
@@ -119,17 +140,18 @@ export default function EmailReportModal({ analysis, results, onClose }) {
             <>
               <button
                 onClick={onClose}
-                className="flex-1 rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                disabled={status === "generating" || status === "sending"}
+                className="flex-1 rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSend}
-                disabled={status === "sending"}
+                disabled={status === "generating" || status === "sending"}
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
               >
-                {status === "sending" ? (
-                  <><Loader className="h-4 w-4 animate-spin" /> Sending...</>
+                {statusLabel ? (
+                  <><Loader className="h-4 w-4 animate-spin" /> {statusLabel}</>
                 ) : (
                   <><Send className="h-4 w-4" /> Send Report</>
                 )}

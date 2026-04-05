@@ -1635,18 +1635,19 @@ def analyze_documents():
 
 @app.post("/api/send-report")
 def send_report():
-    """Send analysis summary report via Gmail."""
+    """Send analysis summary report with PDF attachment via Gmail."""
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     from email.mime.base import MIMEBase
     from email import encoders
 
-    data = request.get_json(silent=True) or {}
-    to_email = data.get("to_email", "").strip()
-    subject = data.get("subject", "GhostShip — Analysis Report")
-    analysis = data.get("analysis", {})
-    results = data.get("results", [])
+    # Accept multipart form data (PDF file + JSON fields)
+    to_email = (request.form.get("to_email") or "").strip()
+    subject = request.form.get("subject") or "GhostShip — Analysis Report"
+    analysis = json.loads(request.form.get("analysis") or "{}")
+    results = json.loads(request.form.get("results") or "[]")
+    pdf_file = request.files.get("pdf")
 
     if not to_email:
         return jsonify({"ok": False, "message": "Recipient email is required"}), 400
@@ -1715,11 +1716,21 @@ def send_report():
     """
 
     try:
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("mixed")
         msg["From"] = gmail_user
         msg["To"] = to_email
         msg["Subject"] = subject
         msg.attach(MIMEText(html, "html"))
+
+        # Attach PDF if provided
+        if pdf_file:
+            pdf_bytes = pdf_file.read()
+            part = MIMEBase("application", "pdf")
+            part.set_payload(pdf_bytes)
+            encoders.encode_base64(part)
+            filename = secure_filename(pdf_file.filename or "GhostShip_Report.pdf")
+            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            msg.attach(part)
 
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.ehlo()
@@ -1727,7 +1738,7 @@ def send_report():
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, to_email, msg.as_string())
 
-        logger.info("report_email_sent", to=to_email)
+        logger.info("report_email_sent", to=to_email, has_pdf=bool(pdf_file))
         return jsonify({"ok": True, "message": f"Report sent to {to_email}"})
 
     except smtplib.SMTPAuthenticationError:

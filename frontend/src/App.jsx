@@ -715,6 +715,7 @@ export default function App() {
           <EmailReportModal
             analysis={analysis}
             results={results}
+            officerProfile={displayedProfile}
             onClose={() => setShowEmailModal(false)}
           />
         )}
