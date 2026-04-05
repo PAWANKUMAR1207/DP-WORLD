@@ -201,20 +201,19 @@ export function useAnalysis() {
     setError("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", csvFile);
-      formData.append("settings", JSON.stringify(settings));
-
-      // Retry up to 3 times to handle Render cold starts (backend may take ~30s to wake)
+      // Retry up to 3 times — rebuild FormData each attempt so the stream isn't reused
       let response;
       let lastError;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
+          const fd = new FormData();
+          fd.append("file", csvFile);
+          fd.append("settings", JSON.stringify(settings));
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
+          const timeout = setTimeout(() => controller.abort(), 90000); // 90s timeout
           response = await fetch(`${API_BASE}/api/analyze`, {
             method: "POST",
-            body: formData,
+            body: fd,
             signal: controller.signal,
           });
           clearTimeout(timeout);

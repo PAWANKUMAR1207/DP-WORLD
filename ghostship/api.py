@@ -9,7 +9,6 @@ import sqlite3
 
 import pandas as pd
 from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -55,18 +54,27 @@ MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB for documents
 MAX_CSV_SIZE = 10 * 1024 * 1024  # 10MB for CSV files
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
-# CORS configuration - restrict to specific origins in production
-_allowed_origins = os.getenv(
+# CORS configuration - manual handler, reliable across all flask-cors versions
+_allowed_origins = set(os.getenv(
     "ALLOWED_ORIGINS",
     "http://127.0.0.1:5173,http://localhost:5173,https://dp-world-svv2.onrender.com,https://hue-overlively-heide.ngrok-free.dev",
-).split(",")
-CORS(app, resources={
-    r"/api/*": {
-        "origins": _allowed_origins,
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-    }
-})
+).split(","))
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin", "")
+    if origin in _allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, ngrok-skip-browser-warning"
+    response.headers["Access-Control-Max-Age"] = "3600"
+    return response
+
+@app.before_request
+def handle_options():
+    if request.method == "OPTIONS":
+        resp = app.make_default_options_response()
+        return add_cors_headers(resp)
 
 # Document fields configuration
 DOCUMENT_FIELDS = ("invoice", "packing_list", "bill_of_lading")
