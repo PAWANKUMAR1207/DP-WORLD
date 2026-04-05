@@ -1633,6 +1633,110 @@ def analyze_documents():
         return jsonify({"ok": False, "message": f"Document analysis failed: {error}"}), 500
 
 
+@app.post("/api/send-report")
+def send_report():
+    """Send analysis summary report via Gmail."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
+
+    data = request.get_json(silent=True) or {}
+    to_email = data.get("to_email", "").strip()
+    subject = data.get("subject", "GhostShip — Analysis Report")
+    analysis = data.get("analysis", {})
+    results = data.get("results", [])
+
+    if not to_email:
+        return jsonify({"ok": False, "message": "Recipient email is required"}), 400
+
+    gmail_user = os.getenv("GMAIL_USER", "")
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD", "")
+    if not gmail_user or not gmail_password:
+        return jsonify({"ok": False, "message": "Email credentials not configured on server"}), 500
+
+    # Build HTML email body
+    risk_score = analysis.get("riskScore", 0)
+    status = analysis.get("status", "UNKNOWN")
+    action = analysis.get("recommendedAction", "N/A")
+    explanation = analysis.get("explanation", "")
+    shipment = analysis.get("shipmentDetails", {})
+    risk_factors = analysis.get("riskFactors", [])
+
+    status_color = {"HIGH": "#ef4444", "MEDIUM": "#f97316", "LOW": "#22c55e"}.get(status, "#64748b")
+
+    factors_html = "".join(f"<li style='margin:4px 0;color:#374151'>{f}</li>" for f in risk_factors)
+    results_rows = "".join(
+        f"""<tr>
+          <td style='padding:8px 12px;border-bottom:1px solid #e5e7eb'>{r.get('shipment_id','—')}</td>
+          <td style='padding:8px 12px;border-bottom:1px solid #e5e7eb'>{r.get('risk_score',0)}</td>
+          <td style='padding:8px 12px;border-bottom:1px solid #e5e7eb'>{r.get('classification','—')}</td>
+          <td style='padding:8px 12px;border-bottom:1px solid #e5e7eb'>{r.get('action','—')}</td>
+        </tr>"""
+        for r in results[:20]
+    )
+
+    html = f"""
+    <html><body style='font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:0'>
+    <div style='max-width:680px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)'>
+      <div style='background:#0f172a;padding:28px 32px'>
+        <p style='margin:0;color:#94a3b8;font-size:11px;letter-spacing:2px;text-transform:uppercase'>GhostShip Port Intelligence</p>
+        <h1 style='margin:8px 0 0;color:#fff;font-size:22px'>Analysis Report</h1>
+      </div>
+
+      <div style='padding:28px 32px'>
+        <div style='display:flex;align-items:center;gap:16px;background:#f1f5f9;border-radius:12px;padding:20px'>
+          <div style='background:{status_color};color:#fff;border-radius:50%;width:64px;height:64px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex-shrink:0'>{risk_score}</div>
+          <div>
+            <p style='margin:0;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:1px'>Risk Status</p>
+            <p style='margin:4px 0 0;font-size:20px;font-weight:700;color:{status_color}'>{status}</p>
+            <p style='margin:4px 0 0;font-size:13px;color:#374151'>{action}</p>
+          </div>
+        </div>
+
+        <p style='margin:20px 0 8px;color:#374151;font-size:14px;line-height:1.6'>{explanation}</p>
+
+        <h2 style='font-size:14px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:24px 0 12px'>Shipment Details</h2>
+        <table style='width:100%;border-collapse:collapse;font-size:13px'>
+          {''.join(f"<tr><td style='padding:6px 0;color:#64748b;width:40%'>{k.replace('_',' ').title()}</td><td style='padding:6px 0;color:#0f172a;font-weight:600'>{v}</td></tr>" for k, v in shipment.items() if v and v != 'Unknown')}
+        </table>
+
+        {"<h2 style='font-size:14px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:24px 0 12px'>Risk Factors</h2><ul style='margin:0;padding-left:20px'>" + factors_html + "</ul>" if risk_factors else ""}
+
+        {"<h2 style='font-size:14px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:24px 0 12px'>Shipment Results</h2><table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f1f5f9'><th style='padding:10px 12px;text-align:left;color:#374151'>Shipment ID</th><th style='padding:10px 12px;text-align:left;color:#374151'>Score</th><th style='padding:10px 12px;text-align:left;color:#374151'>Risk</th><th style='padding:10px 12px;text-align:left;color:#374151'>Action</th></tr></thead><tbody>" + results_rows + "</tbody></table>" if results else ""}
+      </div>
+
+      <div style='background:#f1f5f9;padding:16px 32px;text-align:center'>
+        <p style='margin:0;font-size:11px;color:#94a3b8'>Sent from GhostShip Port Intelligence System · Confidential</p>
+      </div>
+    </div>
+    </body></html>
+    """
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = gmail_user
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(gmail_user, gmail_password)
+            server.sendmail(gmail_user, to_email, msg.as_string())
+
+        logger.info("report_email_sent", to=to_email)
+        return jsonify({"ok": True, "message": f"Report sent to {to_email}"})
+
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({"ok": False, "message": "Gmail authentication failed. Use an App Password, not your account password."}), 500
+    except Exception as error:
+        logger.error("email_send_failed", error=str(error))
+        return jsonify({"ok": False, "message": f"Failed to send email: {error}"}), 500
+
+
 if __name__ == "__main__":
     logger.info("starting_ghostship_api", host="127.0.0.1", port=5000)
     app.run(host="127.0.0.1", port=5000, debug=False)
