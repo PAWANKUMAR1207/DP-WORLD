@@ -58,7 +58,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 # CORS configuration - restrict to specific origins in production
 _allowed_origins = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://127.0.0.1:5173,http://localhost:5173,https://dp-world-svv2.onrender.com",
+    "http://127.0.0.1:5173,http://localhost:5173,https://dp-world-svv2.onrender.com,https://hue-overlively-heide.ngrok-free.dev",
 ).split(",")
 CORS(app, resources={
     r"/api/*": {
