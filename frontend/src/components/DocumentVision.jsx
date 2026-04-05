@@ -1,5 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { Eye, AlertTriangle, ZoomIn, ZoomOut, FileSearch } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import {
+  Eye, AlertTriangle, ZoomIn, ZoomOut, FileSearch,
+  Pencil, Type, Highlighter, Trash2, Download, X, ChevronLeft, ChevronRight,
+} from "lucide-react";
+
+// pdf.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.mjs",
+  import.meta.url
+).toString();
 
 const zonePalette = {
   critical: { color: "#ef4444", label: "Critical" },
@@ -8,250 +19,466 @@ const zonePalette = {
   clear: { color: "#22c55e", label: "Clear" },
 };
 
-const fieldDefinitions = [
-  { key: "container_id", label: "Container ID", y: 22, height: 8 },
-  { key: "shipment_id", label: "Shipment ID", y: 31, height: 8 },
-  { key: "commodity", label: "Commodity", y: 42, height: 9 },
-  { key: "quantity", label: "Quantity", y: 55, height: 8 },
-  { key: "declared_value", label: "Declared Value", y: 66, height: 8 },
-  { key: "origin", label: "Origin", y: 77, height: 8 },
-  { key: "destination", label: "Destination", y: 86, height: 7 },
-];
-
-function buildEstimatedZones(riskFactors, parsedFields) {
-  const normalizedFactors = (riskFactors || []).map((factor) => String(factor).toLowerCase());
-  const zones = [];
-
-  fieldDefinitions.forEach((field, index) => {
-    const value = parsedFields?.[field.key];
-    if (value == null || value === "") return;
-
-    let tone = "clear";
-    let reason = `${field.label} extracted from the uploaded document.`;
-
-    if (field.key === "quantity" && normalizedFactors.some((factor) => /quantity|mismatch|variance/.test(factor))) {
-      tone = "critical";
-      reason = "Quantity should be reviewed because document comparison detected a mismatch.";
-    } else if (field.key === "declared_value" && normalizedFactors.some((factor) => /value|amount|invoice/.test(factor))) {
-      tone = "suspicious";
-      reason = "Declared value should be reviewed because pricing or value consistency was flagged.";
-    } else if ((field.key === "origin" || field.key === "destination") && normalizedFactors.some((factor) => /origin|country|destination/.test(factor))) {
-      tone = "warning";
-      reason = "Route and country fields should be checked against the other uploaded documents.";
-    } else if (field.key === "container_id" && normalizedFactors.some((factor) => /container|document manipulation|differs across uploaded documents/.test(factor))) {
-      tone = "critical";
-      reason = "Container identity appears inconsistent across the uploaded document set.";
-    }
-
-    zones.push({
-      id: index + 1,
-      field: field.key,
-      label: field.label,
-      value: String(value),
-      tone,
-      confidence: tone === "critical" ? 92 : tone === "suspicious" ? 84 : tone === "warning" ? 78 : 72,
-      x: 16 + (index % 2) * 34,
-      y: field.y,
-      width: index % 2 === 0 ? 46 : 38,
-      height: field.height,
-      reason,
-    });
-  });
-
-  if (!zones.length) {
-    zones.push({
-      id: 999,
-      field: "overview",
-      label: "Review Summary",
-      value: "Parsed document content is available, but no specific review fields were extracted.",
-      tone: "warning",
-      confidence: 60,
-      x: 18,
-      y: 46,
-      width: 56,
-      height: 12,
-      reason: "Use the extracted text excerpt and cross-document comparison to complete the review.",
-    });
-  }
-
-  return zones;
-}
-
 const documentTabs = [
   { key: "invoice", label: "Commercial Invoice" },
   { key: "packing_list", label: "Packing List" },
   { key: "bill_of_lading", label: "Bill of Lading" },
 ];
 
-export default function DocumentVision({ documentType, documentData, riskFactors, documents }) {
-  const [zoom, setZoom] = useState(1);
-  const [selectedZoneId, setSelectedZoneId] = useState(null);
+const EDIT_TOOLS = [
+  { key: "text", icon: Type, label: "Add Text" },
+  { key: "highlight", icon: Highlighter, label: "Highlight" },
+];
+
+export default function DocumentVision({ documentType, documentData, riskFactors, documents, uploadedFiles }) {
   const [activeDocument, setActiveDocument] = useState(documentType || "invoice");
+  const [zoom, setZoom] = useState(1.2);
+  const [pdfDoc, setPdfDoc] = useState(null);       // pdfjs document
+  const [pageNum, setPageNum] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [editMode, setEditMode] = useState(false);
+  const [activeTool, setActiveTool] = useState("text");
+  const [annotations, setAnnotations] = useState({});  // { docKey: [{id, tool, x, y, text, page, color, w, h}] }
+  const [editingAnnotation, setEditingAnnotation] = useState(null); // id of annotation being typed
+  const [pendingInput, setPendingInput] = useState("");
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+  const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
+  const [pdfPageSize, setPdfPageSize] = useState({ width: 1, height: 1 }); // unscaled PDF page size
 
-  useEffect(() => {
-    setActiveDocument(documentType || "invoice");
-  }, [documentType]);
+  const canvasRef = useRef(null);
+  const viewerRef = useRef(null);
+  const renderTaskRef = useRef(null);
 
+  const activeFile = uploadedFiles?.[activeDocument];
   const activeData = documents?.[activeDocument] || documentData || {};
-
   const parsedFields = activeData?.parsed_fields || {};
   const textExcerpt = activeData?.text_excerpt || "No extracted text available.";
+  const docAnnotations = annotations[activeDocument] || [];
+  const highlightedRiskCount = (riskFactors || []).length;
 
-  const zones = useMemo(() => buildEstimatedZones(riskFactors, parsedFields), [parsedFields, riskFactors]);
-  const selectedZone = zones.find((zone) => zone.id === selectedZoneId) || zones[0];
-  const highlightedCount = zones.filter((zone) => zone.tone !== "clear").length;
+  // Load PDF from File object
+  useEffect(() => {
+    if (!activeFile) { setPdfDoc(null); return; }
+    let cancelled = false;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      if (cancelled) return;
+      try {
+        const typedArray = new Uint8Array(e.target.result);
+        const doc = await pdfjsLib.getDocument({ data: typedArray }).promise;
+        if (cancelled) return;
+        setPdfDoc(doc);
+        setTotalPages(doc.numPages);
+        setPageNum(1);
+      } catch {
+        setPdfDoc(null);
+      }
+    };
+    reader.readAsArrayBuffer(activeFile);
+    return () => { cancelled = true; };
+  }, [activeFile]);
+
+  // Render current page to canvas
+  useEffect(() => {
+    if (!pdfDoc || !canvasRef.current) return;
+    let cancelled = false;
+
+    async function renderPage() {
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
+      const page = await pdfDoc.getPage(pageNum);
+      if (cancelled) return;
+
+      const viewport = page.getViewport({ scale: zoom });
+      setPdfPageSize({ width: viewport.width / zoom, height: viewport.height / zoom });
+
+      const canvas = canvasRef.current;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      if (viewerRef.current) {
+        setViewerSize({ width: viewport.width, height: viewport.height });
+      }
+
+      const ctx = canvas.getContext("2d");
+      const task = page.render({ canvasContext: ctx, viewport });
+      renderTaskRef.current = task;
+      try {
+        await task.promise;
+      } catch (err) {
+        if (err?.name !== "RenderingCancelledException") console.warn(err);
+      }
+    }
+
+    renderPage();
+    return () => { cancelled = true; };
+  }, [pdfDoc, pageNum, zoom]);
+
+  // Handle click on PDF canvas to place annotation
+  const handleCanvasClick = useCallback((e) => {
+    if (!editMode || !canvasRef.current) return;
+    if (editingAnnotation) return; // finish current edit first
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;   // % of canvas width
+    const y = ((e.clientY - rect.top) / rect.height) * 100;   // % of canvas height
+
+    const id = `ann-${Date.now()}`;
+    const newAnn = {
+      id, tool: activeTool, x, y, text: "", page: pageNum,
+      color: activeTool === "highlight" ? "#fde047" : "#1e293b", w: 30, h: 5,
+    };
+
+    setAnnotations((prev) => ({
+      ...prev,
+      [activeDocument]: [...(prev[activeDocument] || []), newAnn],
+    }));
+
+    if (activeTool === "text") {
+      setEditingAnnotation(id);
+      setPendingInput("");
+    }
+  }, [editMode, activeTool, editingAnnotation, activeDocument, pageNum]);
+
+  const commitTextEdit = useCallback(() => {
+    if (!editingAnnotation) return;
+    if (!pendingInput.trim()) {
+      // remove empty annotation
+      setAnnotations((prev) => ({
+        ...prev,
+        [activeDocument]: (prev[activeDocument] || []).filter((a) => a.id !== editingAnnotation),
+      }));
+    } else {
+      setAnnotations((prev) => ({
+        ...prev,
+        [activeDocument]: (prev[activeDocument] || []).map((a) =>
+          a.id === editingAnnotation ? { ...a, text: pendingInput.trim() } : a
+        ),
+      }));
+    }
+    setEditingAnnotation(null);
+    setPendingInput("");
+  }, [editingAnnotation, pendingInput, activeDocument]);
+
+  const deleteAnnotation = useCallback((id) => {
+    setAnnotations((prev) => ({
+      ...prev,
+      [activeDocument]: (prev[activeDocument] || []).filter((a) => a.id !== id),
+    }));
+    if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+  }, [activeDocument, selectedAnnotationId]);
+
+  // Save annotated PDF via pdf-lib
+  const saveAnnotatedPDF = useCallback(async () => {
+    if (!activeFile) return;
+    const bytes = await activeFile.arrayBuffer();
+    const pdfLibDoc = await PDFDocument.load(bytes);
+    const helvetica = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
+    const pages = pdfLibDoc.getPages();
+
+    const pageAnnotations = (annotations[activeDocument] || []).filter((a) => a.page === pageNum);
+
+    for (const ann of pageAnnotations) {
+      const page = pages[ann.page - 1];
+      if (!page) continue;
+      const { width: pWidth, height: pHeight } = page.getSize();
+
+      const absX = (ann.x / 100) * pWidth;
+      const absY = pHeight - (ann.y / 100) * pHeight; // PDF y is from bottom
+
+      if (ann.tool === "highlight") {
+        page.drawRectangle({
+          x: absX,
+          y: absY - 14,
+          width: (ann.w / 100) * pWidth,
+          height: 14,
+          color: rgb(0.99, 0.87, 0.28),
+          opacity: 0.5,
+        });
+      } else if (ann.tool === "text" && ann.text) {
+        page.drawText(ann.text, {
+          x: absX,
+          y: absY - 10,
+          size: 11,
+          font: helvetica,
+          color: rgb(0.07, 0.11, 0.16),
+        });
+      }
+    }
+
+    const modifiedBytes = await pdfLibDoc.save();
+    const blob = new Blob([modifiedBytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `edited_${activeFile.name}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [activeFile, annotations, activeDocument, pageNum]);
+
+  const switchDocument = (key) => {
+    if (editingAnnotation) commitTextEdit();
+    setActiveDocument(key);
+    setPageNum(1);
+    setSelectedAnnotationId(null);
+    setEditingAnnotation(null);
+  };
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.35)]">
+      {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Eye className="h-5 w-5 text-slate-600" />
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Document Review Overlay</p>
           </div>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">Estimated Review Zones</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            This view uses parsed document fields and extracted text to suggest where an officer should review the document. Exact OCR coordinates are not enabled in the current build.
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">PDF Viewer &amp; Editor</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {activeFile
+              ? "View and annotate the uploaded PDF. Switch to Edit Mode to add text or highlights, then save."
+              : "Upload documents above to view them here."}
           </p>
         </div>
-        {highlightedCount > 0 ? (
+        {highlightedRiskCount > 0 && (
           <div className="flex items-center gap-2 rounded-full bg-red-50 px-3 py-1.5 text-red-700">
             <AlertTriangle className="h-4 w-4" />
-            <span className="text-sm font-medium">{highlightedCount} flagged review zones</span>
+            <span className="text-sm font-medium">{highlightedRiskCount} risk factors</span>
           </div>
-        ) : null}
+        )}
       </div>
 
+      {/* Document tabs */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {documentTabs.map((tab) => {
-          const fileName = documents?.[tab.key]?.file_name;
+          const file = uploadedFiles?.[tab.key];
           const active = activeDocument === tab.key;
           return (
             <button
               key={tab.key}
               type="button"
-              onClick={() => {
-                setActiveDocument(tab.key);
-                setSelectedZoneId(null);
-              }}
+              onClick={() => switchDocument(tab.key)}
               className={`rounded-2xl border px-4 py-3 text-left transition ${
                 active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-800"
               }`}
             >
               <p className={`text-sm font-semibold ${active ? "text-white" : "text-slate-900"}`}>{tab.label}</p>
               <p className={`mt-1 truncate text-xs ${active ? "text-slate-200" : "text-slate-500"}`}>
-                {fileName || "No file selected"}
+                {file ? file.name : "No file uploaded"}
               </p>
             </button>
           );
         })}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-          <div className="absolute right-3 top-3 z-10 flex gap-2">
-            <button onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))} className="rounded-lg bg-white p-2 shadow-sm hover:bg-slate-50">
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        {/* PDF Viewer */}
+        <div className="flex flex-col gap-3">
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+            {/* Zoom */}
+            <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))} className="rounded-lg bg-white p-2 shadow-sm hover:bg-slate-100">
               <ZoomOut className="h-4 w-4" />
             </button>
-            <span className="rounded-lg bg-white px-3 py-2 text-sm font-medium shadow-sm">{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom((value) => Math.min(2, value + 0.25))} className="rounded-lg bg-white p-2 shadow-sm hover:bg-slate-50">
+            <span className="min-w-[48px] text-center text-sm font-medium">{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom((z) => Math.min(3, z + 0.25))} className="rounded-lg bg-white p-2 shadow-sm hover:bg-slate-100">
               <ZoomIn className="h-4 w-4" />
             </button>
+
+            <div className="mx-1 h-6 w-px bg-slate-300" />
+
+            {/* Page nav */}
+            {totalPages > 1 && (
+              <>
+                <button onClick={() => setPageNum((p) => Math.max(1, p - 1))} disabled={pageNum === 1} className="rounded-lg bg-white p-2 shadow-sm hover:bg-slate-100 disabled:opacity-40">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-sm font-medium">{pageNum} / {totalPages}</span>
+                <button onClick={() => setPageNum((p) => Math.min(totalPages, p + 1))} disabled={pageNum === totalPages} className="rounded-lg bg-white p-2 shadow-sm hover:bg-slate-100 disabled:opacity-40">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <div className="mx-1 h-6 w-px bg-slate-300" />
+              </>
+            )}
+
+            {/* Edit mode toggle */}
+            <button
+              onClick={() => { setEditMode((v) => !v); if (editingAnnotation) commitTextEdit(); }}
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium shadow-sm transition ${
+                editMode ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <Pencil className="h-4 w-4" />
+              {editMode ? "Editing" : "Edit Mode"}
+            </button>
+
+            {/* Edit tools (visible only in edit mode) */}
+            {editMode && (
+              <>
+                {EDIT_TOOLS.map((tool) => (
+                  <button
+                    key={tool.key}
+                    onClick={() => setActiveTool(tool.key)}
+                    title={tool.label}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium shadow-sm transition ${
+                      activeTool === tool.key ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <tool.icon className="h-4 w-4" />
+                    {tool.label}
+                  </button>
+                ))}
+              </>
+            )}
+
+            <div className="ml-auto" />
+
+            {/* Save */}
+            {activeFile && (
+              <button
+                onClick={saveAnnotatedPDF}
+                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+              >
+                <Download className="h-4 w-4" />
+                Save PDF
+              </button>
+            )}
           </div>
 
-          <div className="min-h-[420px] overflow-auto p-8">
-            <div className="mx-auto w-[560px]" style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}>
-              <div className="relative rounded-sm bg-white p-8 shadow-lg">
-                <div className="mb-6 border-b-2 border-slate-800 pb-4">
-                  <h3 className="text-2xl font-bold uppercase tracking-wider text-slate-900">
-                    {documentTabs.find((tab) => tab.key === activeDocument)?.label || "Document"}
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500">Reference {parsedFields?.shipment_id || parsedFields?.container_id || "REF-001"}</p>
-                </div>
+          {/* Edit mode hint */}
+          {editMode && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800">
+              {activeTool === "text"
+                ? "Click anywhere on the PDF to add a text annotation. Press Enter to confirm."
+                : "Click anywhere on the PDF to add a highlight box."}
+            </div>
+          )}
 
-                <div className="grid gap-3">
-                  {fieldDefinitions.map((field) => (
-                    <div key={field.key} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{field.label}</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">{parsedFields?.[field.key] ?? "Not extracted"}</p>
+          {/* Canvas area */}
+          <div
+            className="relative overflow-auto rounded-2xl border border-slate-200 bg-slate-100"
+            style={{ minHeight: 480 }}
+          >
+            {activeFile && pdfDoc ? (
+              <div
+                ref={viewerRef}
+                className="relative mx-auto"
+                style={{ width: viewerSize.width || "100%", cursor: editMode ? "crosshair" : "default" }}
+                onClick={handleCanvasClick}
+              >
+                <canvas ref={canvasRef} className="block" />
+
+                {/* Annotation overlays */}
+                <div className="pointer-events-none absolute inset-0">
+                  {docAnnotations.filter((a) => a.page === pageNum).map((ann) => (
+                    <div
+                      key={ann.id}
+                      className="pointer-events-auto absolute"
+                      style={{ left: `${ann.x}%`, top: `${ann.y}%` }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedAnnotationId(ann.id); }}
+                    >
+                      {ann.tool === "highlight" ? (
+                        <div
+                          style={{
+                            width: `${ann.w}vw`,
+                            height: "1.2rem",
+                            backgroundColor: "#fde04780",
+                            border: selectedAnnotationId === ann.id ? "2px dashed #ca8a04" : "none",
+                            borderRadius: 3,
+                          }}
+                        />
+                      ) : ann.id === editingAnnotation ? (
+                        <input
+                          autoFocus
+                          value={pendingInput}
+                          onChange={(e) => setPendingInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") commitTextEdit(); if (e.key === "Escape") { setEditingAnnotation(null); setPendingInput(""); deleteAnnotation(ann.id); } }}
+                          onBlur={commitTextEdit}
+                          onClick={(e) => e.stopPropagation()}
+                          className="min-w-[120px] rounded border border-blue-400 bg-white px-2 py-1 text-sm shadow-lg outline-none"
+                          placeholder="Type and press Enter"
+                        />
+                      ) : (
+                        <div
+                          className={`cursor-pointer rounded px-2 py-1 text-sm font-medium shadow-sm ${
+                            selectedAnnotationId === ann.id ? "ring-2 ring-blue-500" : ""
+                          }`}
+                          style={{ backgroundColor: "#ffffffcc", color: ann.color, border: "1px solid #e2e8f0" }}
+                        >
+                          {ann.text}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
-
-                {zones.map((zone) => {
-                  const palette = zonePalette[zone.tone];
-                  return (
-                    <button
-                      key={zone.id}
-                      type="button"
-                      onClick={() => setSelectedZoneId(zone.id)}
-                      className="absolute cursor-pointer rounded-md transition-all hover:scale-[1.01]"
-                      style={{
-                        left: `${zone.x}%`,
-                        top: `${zone.y}%`,
-                        width: `${zone.width}%`,
-                        height: `${zone.height}%`,
-                        border: `3px solid ${palette.color}`,
-                        backgroundColor: `${palette.color}18`,
-                        boxShadow: selectedZone?.id === zone.id ? `0 0 0 4px ${palette.color}20` : "none",
-                      }}
-                    >
-                      <span
-                        className="absolute -top-6 left-0 rounded px-2 py-1 text-xs font-bold text-white"
-                        style={{ backgroundColor: palette.color }}
-                      >
-                        {zone.label}
-                      </span>
-                    </button>
-                  );
-                })}
               </div>
-            </div>
-          </div>
-
-          <div className="absolute bottom-3 left-3 rounded-lg bg-white/90 p-3 shadow-sm backdrop-blur">
-            <p className="mb-2 text-xs font-semibold text-slate-600">Zone meaning:</p>
-            <div className="flex flex-wrap gap-2 text-xs">
-              {Object.values(zonePalette).map((tone) => (
-                <span key={tone.label} className="flex items-center gap-1">
-                  <span className="h-3 w-3 rounded" style={{ backgroundColor: tone.color }} />
-                  {tone.label}
-                </span>
-              ))}
-            </div>
+            ) : (
+              <div className="flex min-h-[480px] flex-col items-center justify-center gap-3 text-slate-400">
+                <FileSearch className="h-12 w-12" />
+                <p className="text-sm font-medium">
+                  {activeFile ? "Loading PDF..." : "No PDF uploaded for this document type"}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Right panel */}
         <div className="space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Review Zones ({zones.length})</p>
-            <div className="mt-3 space-y-3">
-              {zones.map((zone) => {
-                const palette = zonePalette[zone.tone];
-                return (
-                  <button
-                    key={zone.id}
-                    type="button"
-                    onClick={() => setSelectedZoneId(zone.id)}
-                    className={`w-full rounded-xl border-2 p-4 text-left transition ${selectedZone?.id === zone.id ? "border-slate-800 bg-slate-50" : "border-slate-200 hover:border-slate-300"}`}
+          {/* Annotations list */}
+          {docAnnotations.filter((a) => a.page === pageNum).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Annotations — Page {pageNum} ({docAnnotations.filter((a) => a.page === pageNum).length})
+              </p>
+              <div className="mt-3 space-y-2">
+                {docAnnotations.filter((a) => a.page === pageNum).map((ann) => (
+                  <div
+                    key={ann.id}
+                    onClick={() => setSelectedAnnotationId(ann.id)}
+                    className={`flex items-start justify-between gap-3 rounded-xl border p-3 cursor-pointer transition ${
+                      selectedAnnotationId === ann.id ? "border-blue-400 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"
+                    }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-900">{zone.label}</p>
-                        <p className="mt-1 text-sm text-slate-600">{zone.reason}</p>
-                        <p className="mt-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Extracted value</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">{zone.value}</p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
+                          ann.tool === "highlight" ? "bg-yellow-200 text-yellow-800" : "bg-slate-200 text-slate-700"
+                        }`}>{ann.tool}</span>
                       </div>
-                      <span className="rounded px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: palette.color }}>
-                        {zone.confidence}%
-                      </span>
+                      {ann.text && <p className="mt-1 text-sm text-slate-700">{ann.text}</p>}
+                      <p className="mt-1 text-xs text-slate-400">x:{Math.round(ann.x)}% y:{Math.round(ann.y)}%</p>
                     </div>
-                  </button>
-                );
-              })}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteAnnotation(ann.id); }}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
+          {/* Extracted fields */}
+          {Object.keys(parsedFields).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Extracted Fields</p>
+              <div className="mt-3 space-y-2">
+                {Object.entries(parsedFields).map(([key, value]) => (
+                  <div key={key} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{key.replace(/_/g, " ")}</p>
+                    <p className="mt-0.5 text-sm font-medium text-slate-900">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Text excerpt */}
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
             <div className="flex items-center gap-2">
               <FileSearch className="h-4 w-4 text-slate-600" />
@@ -259,14 +486,15 @@ export default function DocumentVision({ documentType, documentData, riskFactors
             </div>
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{textExcerpt}</p>
           </div>
-        </div>
-      </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-4">
-        <StatCard value={zones.length} label="Zones Shown" tone="text-slate-900" />
-        <StatCard value={`${Math.round(zones.reduce((sum, zone) => sum + zone.confidence, 0) / zones.length)}%`} label="Avg Review Confidence" tone="text-red-600" />
-        <StatCard value={highlightedCount} label="Flagged Zones" tone="text-amber-600" />
-        <StatCard value={documentTabs.find((tab) => tab.key === activeDocument)?.label || activeDocument} label="Document Type" tone="text-slate-900" />
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard value={docAnnotations.length} label="Total Annotations" tone="text-slate-900" />
+            <StatCard value={totalPages} label="PDF Pages" tone="text-slate-900" />
+            <StatCard value={highlightedRiskCount} label="Risk Factors" tone="text-amber-600" />
+            <StatCard value={activeFile ? "Loaded" : "None"} label="File Status" tone={activeFile ? "text-emerald-600" : "text-slate-400"} />
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -275,7 +503,7 @@ export default function DocumentVision({ documentType, documentData, riskFactors
 function StatCard({ value, label, tone }) {
   return (
     <div className="rounded-xl bg-slate-50 p-3 text-center">
-      <p className={`text-2xl font-bold ${tone}`}>{value}</p>
+      <p className={`text-xl font-bold ${tone}`}>{value}</p>
       <p className="text-xs text-slate-600">{label}</p>
     </div>
   );

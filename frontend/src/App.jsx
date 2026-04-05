@@ -679,11 +679,12 @@ export default function App() {
 
         {activeView === "analysis" && intakeMode === "documents" && (
           <section className="grid gap-5">
-            <DocumentVision 
+            <DocumentVision
               documentType="invoice"
               documentData={documentInsights.invoice}
               riskFactors={analysis.riskFactors}
               documents={documentInsights}
+              uploadedFiles={documents}
             />
           </section>
         )}
