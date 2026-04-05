@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import {
   Eye, AlertTriangle, ZoomIn, ZoomOut, FileSearch,
-  Pencil, Type, Highlighter, Trash2, Download, X, ChevronLeft, ChevronRight,
+  Pencil, Type, Highlighter, Trash2, Download, ChevronLeft, ChevronRight,
 } from "lucide-react";
 
-// pdf.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.mjs",
-  import.meta.url
-).toString();
+// Vite-idiomatic worker URL — resolves correctly in both dev and prod
+pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const zonePalette = {
   critical: { color: "#ef4444", label: "Critical" },
@@ -44,6 +42,7 @@ export default function DocumentVision({ documentType, documentData, riskFactors
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
   const [viewerSize, setViewerSize] = useState({ width: 0, height: 0 });
   const [pdfPageSize, setPdfPageSize] = useState({ width: 1, height: 1 }); // unscaled PDF page size
+  const [pdfError, setPdfError] = useState(null);
 
   const canvasRef = useRef(null);
   const viewerRef = useRef(null);
@@ -58,9 +57,12 @@ export default function DocumentVision({ documentType, documentData, riskFactors
 
   // Load PDF from File object
   useEffect(() => {
-    if (!activeFile) { setPdfDoc(null); return; }
+    if (!activeFile) { setPdfDoc(null); setPdfError(null); return; }
     let cancelled = false;
+    setPdfDoc(null);
+    setPdfError(null);
     const reader = new FileReader();
+    reader.onerror = () => setPdfError("Could not read file.");
     reader.onload = async (e) => {
       if (cancelled) return;
       try {
@@ -70,8 +72,8 @@ export default function DocumentVision({ documentType, documentData, riskFactors
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
         setPageNum(1);
-      } catch {
-        setPdfDoc(null);
+      } catch (err) {
+        if (!cancelled) setPdfError(err?.message || "Failed to load PDF.");
       }
     };
     reader.readAsArrayBuffer(activeFile);
@@ -418,8 +420,15 @@ export default function DocumentVision({ documentType, documentData, riskFactors
               <div className="flex min-h-[480px] flex-col items-center justify-center gap-3 text-slate-400">
                 <FileSearch className="h-12 w-12" />
                 <p className="text-sm font-medium">
-                  {activeFile ? "Loading PDF..." : "No PDF uploaded for this document type"}
+                  {pdfError
+                    ? `PDF error: ${pdfError}`
+                    : activeFile
+                    ? "Loading PDF..."
+                    : "No PDF uploaded for this document type"}
                 </p>
+                {activeFile && !pdfError && (
+                  <p className="text-xs text-slate-400">{activeFile.name} ({Math.round(activeFile.size / 1024)} KB)</p>
+                )}
               </div>
             )}
           </div>
