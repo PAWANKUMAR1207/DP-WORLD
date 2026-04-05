@@ -205,10 +205,26 @@ export function useAnalysis() {
       formData.append("file", csvFile);
       formData.append("settings", JSON.stringify(settings));
 
-      const response = await fetch(`${API_BASE}/api/analyze`, {
-        method: "POST",
-        body: formData,
-      });
+      // Retry up to 3 times to handle Render cold starts (backend may take ~30s to wake)
+      let response;
+      let lastError;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
+          response = await fetch(`${API_BASE}/api/analyze`, {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+      if (!response) throw new Error(lastError?.message || "Could not reach server. Please try again.");
 
       const payload = await response.json();
 
